@@ -3,9 +3,502 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Emoji Game</title>
+  <title>Desert Golf</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1A0E06;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: 'Courier New', monospace;
+      user-select: none;
+    }
+    #hud {
+      color: #F0C040;
+      font-size: 18px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    canvas {
+      border: 4px solid #6B5030;
+      cursor: crosshair;
+      display: block;
+    }
+    #msg {
+      color: #F0C040;
+      font-size: 22px;
+      letter-spacing: 3px;
+      margin-top: 12px;
+      height: 30px;
+      text-transform: uppercase;
+    }
+    #hint {
+      color: #806030;
+      font-size: 13px;
+      letter-spacing: 1px;
+      margin-top: 6px;
+    }
+  </style>
 </head>
 <body>
-  <h1>Hello World 👋</h1>
+  <div id="hud">Strokes: <span id="strokes">0</span>&nbsp;&nbsp;Par: 5</div>
+  <canvas id="game" width="800" height="600"></canvas>
+  <div id="msg"></div>
+  <div id="hint">Click &amp; drag to aim — release to shoot — R to restart</div>
+
+  <script>
+  'use strict';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const strokesEl = document.getElementById('strokes');
+  const msgEl = document.getElementById('msg');
+
+  // Grid constants
+  const T = 40;        // tile size px
+  const COLS = 20;
+  const ROWS = 15;
+  const SAND = 0;
+  const ROCK = 1;
+
+  // Physics
+  const BALL_R = 8;
+  const FRICTION = 0.97;
+  const MAX_DRAG = 130;
+  const POWER_SCALE = 0.115;  // drag px -> velocity px/frame
+  const STOP_SPEED = 0.25;
+
+  // Level positions
+  const BALL_START = { x: 2.5 * T, y: 7.5 * T };
+  const HOLE_POS   = { x: 17.5 * T, y: 7.5 * T };
+
+  // Level grid (ROWS x COLS)
+  const BASE_LEVEL = [
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1],
+    [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  ];
+
+  // Deep copy level so we can reset
+  function cloneLevel() {
+    return BASE_LEVEL.map(row => row.slice());
+  }
+
+  let level = cloneLevel();
+
+  // Ball state
+  let ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false };
+  let strokes = 0;
+  let won = false;
+
+  // Aim state
+  let aiming = false;
+  let dragFrom = { x: 0, y: 0 };  // where mouse went down
+  let dragTo   = { x: 0, y: 0 };  // current mouse pos while aiming
+
+  // Precompute deterministic sand texture offsets
+  const sandDots = [];
+  for (let r = 0; r < ROWS; r++) {
+    sandDots[r] = [];
+    for (let c = 0; c < COLS; c++) {
+      const dots = [];
+      for (let i = 0; i < 4; i++) {
+        dots.push({
+          x: (c * 31 + r * 17 + i * 23) % (T - 6) + 3,
+          y: (c * 13 + r * 29 + i * 37) % (T - 6) + 3,
+          w: (i * 7 + c + r) % 3 + 1,
+        });
+      }
+      sandDots[r][c] = dots;
+    }
+  }
+
+  function getTile(col, row) {
+    if (row < 0 || row >= ROWS || col < 0 || col >= COLS) return ROCK;
+    return level[row][col];
+  }
+
+  // Circle-AABB collision resolution
+  function resolveCollisions() {
+    const r = BALL_R;
+    const colMin = Math.floor((ball.x - r) / T);
+    const colMax = Math.floor((ball.x + r) / T);
+    const rowMin = Math.floor((ball.y - r) / T);
+    const rowMax = Math.floor((ball.y + r) / T);
+
+    for (let row = rowMin; row <= rowMax; row++) {
+      for (let col = colMin; col <= colMax; col++) {
+        if (getTile(col, row) !== ROCK) continue;
+
+        const tx = col * T;
+        const ty = row * T;
+        // Closest point on tile AABB to ball center
+        const cx = Math.max(tx, Math.min(ball.x, tx + T));
+        const cy = Math.max(ty, Math.min(ball.y, ty + T));
+        const dx = ball.x - cx;
+        const dy = ball.y - cy;
+        const dist2 = dx * dx + dy * dy;
+
+        if (dist2 < r * r && dist2 > 0) {
+          const dist = Math.sqrt(dist2);
+          const nx = dx / dist;
+          const ny = dy / dist;
+          // Push ball out of rock
+          ball.x += nx * (r - dist);
+          ball.y += ny * (r - dist);
+          // Reflect velocity along collision normal (with damping)
+          const dot = ball.vx * nx + ball.vy * ny;
+          if (dot < 0) {
+            ball.vx -= 1.4 * dot * nx;
+            ball.vy -= 1.4 * dot * ny;
+            // Energy loss on bounce
+            ball.vx *= 0.55;
+            ball.vy *= 0.55;
+          }
+        }
+      }
+    }
+  }
+
+  function update() {
+    if (!ball.moving) return;
+
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+    ball.vx *= FRICTION;
+    ball.vy *= FRICTION;
+
+    resolveCollisions();
+
+    const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+    if (speed < STOP_SPEED) {
+      ball.vx = 0;
+      ball.vy = 0;
+      ball.moving = false;
+      checkHole();
+    }
+  }
+
+  function checkHole() {
+    const dx = ball.x - HOLE_POS.x;
+    const dy = ball.y - HOLE_POS.y;
+    if (Math.sqrt(dx * dx + dy * dy) < 15) {
+      ball.x = HOLE_POS.x;
+      ball.y = HOLE_POS.y;
+      won = true;
+      const par = 5;
+      const diff = strokes - par;
+      let tag = '';
+      if (diff <= -2) tag = 'Eagle!';
+      else if (diff === -1) tag = 'Birdie!';
+      else if (diff === 0) tag = 'Par!';
+      else if (diff === 1) tag = 'Bogey';
+      else tag = `+${diff}`;
+      msgEl.textContent = `Hole in ${strokes}  —  ${tag}`;
+    }
+  }
+
+  function reset() {
+    ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false };
+    strokes = 0;
+    won = false;
+    aiming = false;
+    strokesEl.textContent = '0';
+    msgEl.textContent = '';
+    level = cloneLevel();
+  }
+
+  // ── Drawing ──────────────────────────────────────────────────────────────
+
+  function drawTiles() {
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        const x = col * T, y = row * T;
+        if (level[row][col] === SAND) {
+          // Checkerboard-offset for subtle variation
+          ctx.fillStyle = (col + row) % 2 === 0 ? '#C8A440' : '#C2A03C';
+          ctx.fillRect(x, y, T, T);
+          // Subtle sand texture dots
+          ctx.fillStyle = 'rgba(160, 120, 20, 0.25)';
+          for (const d of sandDots[row][col]) {
+            ctx.fillRect(x + d.x, y + d.y, d.w, 1);
+          }
+        } else {
+          // Rock base
+          ctx.fillStyle = '#7A6035';
+          ctx.fillRect(x, y, T, T);
+          // Bevel: light top-left, dark bottom-right
+          ctx.fillStyle = '#9A7C4A';
+          ctx.fillRect(x, y, T, 4);
+          ctx.fillRect(x, y, 4, T);
+          ctx.fillStyle = '#4A3820';
+          ctx.fillRect(x, y + T - 4, T, 4);
+          ctx.fillRect(x + T - 4, y, 4, T);
+          // Rock face marks
+          ctx.fillStyle = 'rgba(80, 55, 20, 0.4)';
+          const mx = x + (col * 13 + row * 7) % (T - 14) + 7;
+          const my = y + (col * 7 + row * 11) % (T - 14) + 7;
+          ctx.fillRect(mx, my, 6, 2);
+          ctx.fillRect(mx + 4, my + 5, 5, 2);
+        }
+      }
+    }
+  }
+
+  function drawHole() {
+    const { x, y } = HOLE_POS;
+    // Shadow
+    ctx.beginPath();
+    ctx.arc(x + 2, y + 2, 13, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fill();
+    // Cup
+    ctx.beginPath();
+    ctx.arc(x, y, 13, 0, Math.PI * 2);
+    ctx.fillStyle = '#0E0905';
+    ctx.fill();
+    ctx.strokeStyle = '#2A1F0A';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Pole
+    ctx.strokeStyle = '#C8AA60';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y - 6);
+    ctx.lineTo(x + 1, y - 32);
+    ctx.stroke();
+    // Flag
+    ctx.fillStyle = '#D03020';
+    ctx.beginPath();
+    ctx.moveTo(x + 1, y - 32);
+    ctx.lineTo(x + 16, y - 24);
+    ctx.lineTo(x + 1, y - 17);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawStartMarker() {
+    // Tee marker behind ball
+    if (strokes === 0 && !ball.moving) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(BALL_START.x, BALL_START.y, BALL_R + 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  function drawBall() {
+    const { x, y } = ball;
+    // Shadow
+    ctx.beginPath();
+    ctx.arc(x + 3, y + 3, BALL_R, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fill();
+    // Ball with radial gradient
+    const grad = ctx.createRadialGradient(x - 3, y - 3, 1, x, y, BALL_R);
+    grad.addColorStop(0, '#FFFFFF');
+    grad.addColorStop(0.5, '#E8E8E0');
+    grad.addColorStop(1, '#B8B8B0');
+    ctx.beginPath();
+    ctx.arc(x, y, BALL_R, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = '#909090';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+  }
+
+  function drawAim() {
+    if (!aiming || ball.moving || won) return;
+
+    const dxRaw = dragTo.x - dragFrom.x;
+    const dyRaw = dragTo.y - dragFrom.y;
+    const dragLen = Math.sqrt(dxRaw * dxRaw + dyRaw * dyRaw);
+
+    if (dragLen < 4) return;
+
+    const clamped = Math.min(dragLen, MAX_DRAG);
+    const t = clamped / MAX_DRAG;        // 0..1 power ratio
+
+    // Launch direction (opposite of drag)
+    const lx = -dxRaw / dragLen;
+    const ly = -dyRaw / dragLen;
+
+    // ── Slingshot band: from drag point to ball ──
+    ctx.save();
+    ctx.strokeStyle = `rgba(200, 160, 60, ${0.3 + 0.4 * t})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(dragTo.x, dragTo.y);
+    ctx.lineTo(ball.x, ball.y);
+    ctx.stroke();
+
+    // ── Aim guide from ball in launch direction ──
+    const aimLength = clamped * 1.4;
+    ctx.setLineDash([7, 5]);
+    ctx.strokeStyle = `rgba(255, 220, 80, ${0.4 + 0.55 * t})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(ball.x, ball.y);
+    ctx.lineTo(ball.x + lx * aimLength, ball.y + ly * aimLength);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── Arrowhead ──
+    const ax = ball.x + lx * aimLength;
+    const ay = ball.y + ly * aimLength;
+    const ang = Math.atan2(ly, lx);
+    const as = 10;
+    ctx.fillStyle = `rgba(255, 210, 60, ${0.5 + 0.5 * t})`;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax - as * Math.cos(ang - 0.45), ay - as * Math.sin(ang - 0.45));
+    ctx.lineTo(ax - as * Math.cos(ang + 0.45), ay - as * Math.sin(ang + 0.45));
+    ctx.closePath();
+    ctx.fill();
+
+    // ── Pull-back dot at drag point ──
+    ctx.beginPath();
+    ctx.arc(dragTo.x, dragTo.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(200, 160, 50, ${0.4 + 0.4 * t})`;
+    ctx.fill();
+
+    // ── Power bar ──
+    const barX = ball.x - 30;
+    const barY = ball.y + BALL_R + 10;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(barX, barY, 60, 7);
+    // Bar fill: green -> yellow -> red
+    const r = Math.floor(60 + 195 * t);
+    const g = Math.floor(200 - 170 * t);
+    ctx.fillStyle = `rgb(${r}, ${g}, 40)`;
+    ctx.fillRect(barX, barY, 60 * t, 7);
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, 60, 7);
+
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawTiles();
+    drawHole();
+    drawStartMarker();
+    drawAim();
+    drawBall();
+  }
+
+  function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
+
+  // ── Input ────────────────────────────────────────────────────────────────
+
+  function canvasPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top)  * scaleY,
+    };
+  }
+
+  canvas.addEventListener('mousedown', e => {
+    if (won || ball.moving) return;
+    const pos = canvasPos(e);
+    aiming = true;
+    dragFrom = pos;
+    dragTo   = pos;
+    e.preventDefault();
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (!aiming) return;
+    dragTo = canvasPos(e);
+  });
+
+  canvas.addEventListener('mouseup', e => {
+    if (!aiming || ball.moving || won) return;
+    aiming = false;
+    shoot();
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    // Keep aiming — let them release outside canvas too
+  });
+
+  window.addEventListener('mouseup', e => {
+    if (!aiming || ball.moving || won) return;
+    aiming = false;
+    shoot();
+  });
+
+  // Touch
+  canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    if (won || ball.moving) return;
+    const pos = canvasPos(e.touches[0]);
+    aiming = true;
+    dragFrom = pos;
+    dragTo   = pos;
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!aiming) return;
+    dragTo = canvasPos(e.touches[0]);
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    if (!aiming || ball.moving || won) return;
+    aiming = false;
+    shoot();
+  }, { passive: false });
+
+  function shoot() {
+    const dxRaw = dragTo.x - dragFrom.x;
+    const dyRaw = dragTo.y - dragFrom.y;
+    const dragLen = Math.sqrt(dxRaw * dxRaw + dyRaw * dyRaw);
+    if (dragLen < 6) return;   // accidental tap, ignore
+
+    const clamped = Math.min(dragLen, MAX_DRAG);
+    const speed = clamped * POWER_SCALE;
+
+    ball.vx = -(dxRaw / dragLen) * speed;
+    ball.vy = -(dyRaw / dragLen) * speed;
+    ball.moving = true;
+    strokes++;
+    strokesEl.textContent = strokes;
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'r' || e.key === 'R') reset();
+  });
+
+  gameLoop();
+  </script>
 </body>
 </html>
