@@ -207,6 +207,99 @@
       padding-bottom: 6px;
       flex-shrink: 0;
     }
+
+    /* ── Sprite-editor button ── */
+    #sprite-btn {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(15,9,3,0.75);
+      border: 2px solid #6B5030;
+      color: #A07828;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    /* ── Sprite editor full-screen overlay ── */
+    #sprite-editor {
+      position: fixed;
+      inset: 0;
+      background: #0C0701;
+      z-index: 300;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      padding: 8px 8px 16px;
+      gap: 8px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+    }
+    #sprite-editor.open { display: flex; }
+
+    .se-row {
+      width: 100%;
+      max-width: 288px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .se-row select {
+      flex: 1;
+      background: #1A0E06;
+      color: #F0C040;
+      border: 1px solid #6B5030;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 4px 6px;
+      border-radius: 3px;
+    }
+    .se-btn {
+      background: rgba(60,40,8,0.9);
+      border: 1px solid #6B5030;
+      color: #F0C040;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 5px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .se-btn.active { border-color: #F0C040; color: #F0C040; background: rgba(80,55,10,0.9); }
+    .se-btn.close  { font-size: 16px; padding: 3px 8px; margin-left: auto; }
+    #se-frame-label { color: #B09040; font-size: 12px; min-width: 36px; text-align: center; }
+
+    #se-canvas {
+      border: 2px solid #6B5030;
+      cursor: crosshair;
+      image-rendering: pixelated;
+      touch-action: none;
+      width: 288px;
+      height: 288px;
+    }
+
+    #se-palette {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 3px;
+      width: 288px;
+    }
+    .se-swatch {
+      aspect-ratio: 1;
+      border: 2px solid #3A2810;
+      cursor: pointer;
+      border-radius: 2px;
+    }
+    .se-swatch.selected { border-color: #F0C040; }
+    .se-swatch.transp {
+      background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 0 0 / 8px 8px;
+    }
   </style>
 </head>
 <body>
@@ -215,7 +308,38 @@
   <div id="game-wrap">
     <canvas id="game" width="360" height="648"></canvas>
     <button id="edit-btn" title="Adjust parameters">⚙</button>
+    <button id="sprite-btn" title="Sprite editor">🎨</button>
     <button id="restart-btn">Play again</button>
+  </div>
+
+  <div id="sprite-editor">
+    <!-- Row 1: sprite picker + close -->
+    <div class="se-row">
+      <select id="se-sprite-select"></select>
+      <button class="se-btn" id="se-sprite-new">+ Sprite</button>
+      <button class="se-btn close" id="se-close">✕</button>
+    </div>
+    <!-- Row 2: frame navigation -->
+    <div class="se-row">
+      <span style="color:#B09040;font-size:12px;letter-spacing:1px">FRAME</span>
+      <button class="se-btn" id="se-frame-prev">◀</button>
+      <span id="se-frame-label">1 / 1</span>
+      <button class="se-btn" id="se-frame-next">▶</button>
+      <button class="se-btn" id="se-frame-add">+ Frame</button>
+      <button class="se-btn" id="se-frame-del">− Frame</button>
+    </div>
+    <!-- Pixel canvas -->
+    <canvas id="se-canvas" width="288" height="288"></canvas>
+    <!-- Palette -->
+    <div id="se-palette"></div>
+    <!-- Tools -->
+    <div class="se-row" style="gap:8px">
+      <button class="se-btn se-tool active" id="se-tool-pencil">✏ Pencil</button>
+      <button class="se-btn se-tool" id="se-tool-eraser">⌫ Erase</button>
+      <button class="se-btn se-tool" id="se-tool-fill">▣ Fill</button>
+      <button class="se-btn" id="se-clear">Clear</button>
+      <button class="se-btn" id="se-copy" style="margin-left:auto">Copy JS</button>
+    </div>
   </div>
 
   <div id="edit-panel">
@@ -879,6 +1003,215 @@
       btn.textContent = '✓ Copied!';
       btn.classList.add('copied');
       setTimeout(() => { btn.textContent = '📋 Copy values'; btn.classList.remove('copied'); }, 2000);
+    });
+  });
+
+  // ── Sprite Editor ────────────────────────────────────────────────────────
+
+  const SE_SCALE = 8;   // canvas px per sprite pixel
+  const SE_SIZE  = 36;  // sprite width and height in pixels
+
+  const SE_PALETTE = [
+    null,      // 0: transparent
+    '#1A0E06', // 1  near-black
+    '#3D2B1A', // 2  dark brown
+    '#7A5C3A', // 3  brown
+    '#C8A440', // 4  sand
+    '#F0C040', // 5  yellow
+    '#E8B870', // 6  skin
+    '#D06820', // 7  orange
+    '#C03020', // 8  red
+    '#FFFFFF', // 9  white
+    '#C0C0C0', // 10 light grey
+    '#808080', // 11 mid grey
+    '#8070C0', // 12 light purple
+    '#4040A0', // 13 dark purple
+    '#4080C0', // 14 blue
+    '#406020', // 15 dark green
+  ];
+
+  // Sprite store: name → { frames: [Uint8Array(SE_SIZE²), …] }
+  const seSprites = {
+    wizard: { frames: [new Uint8Array(SE_SIZE * SE_SIZE)] },
+  };
+  const seState = { name: 'wizard', frame: 0, color: 1, tool: 'pencil', painting: false };
+
+  const seCanvas = document.getElementById('se-canvas');
+  const seCtx    = seCanvas.getContext('2d');
+
+  function seRender() {
+    const frames = seSprites[seState.name]?.frames;
+    if (!frames) return;
+    const frame = frames[seState.frame];
+    for (let py = 0; py < SE_SIZE; py++) {
+      for (let px = 0; px < SE_SIZE; px++) {
+        const ci = frame[py * SE_SIZE + px];
+        seCtx.fillStyle = ci === 0
+          ? ((px + py) % 2 === 0 ? '#444' : '#333')
+          : SE_PALETTE[ci];
+        seCtx.fillRect(px * SE_SCALE, py * SE_SCALE, SE_SCALE, SE_SCALE);
+      }
+    }
+    // Grid lines
+    seCtx.strokeStyle = 'rgba(0,0,0,0.2)';
+    seCtx.lineWidth = 0.5;
+    for (let i = 0; i <= SE_SIZE; i++) {
+      seCtx.beginPath(); seCtx.moveTo(i * SE_SCALE, 0); seCtx.lineTo(i * SE_SCALE, SE_SIZE * SE_SCALE); seCtx.stroke();
+      seCtx.beginPath(); seCtx.moveTo(0, i * SE_SCALE); seCtx.lineTo(SE_SIZE * SE_SCALE, i * SE_SCALE); seCtx.stroke();
+    }
+    document.getElementById('se-frame-label').textContent =
+      `${seState.frame + 1} / ${frames.length}`;
+  }
+
+  function sePixelAt(e) {
+    const rect = seCanvas.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0] : e).clientX;
+    const cy = (e.touches ? e.touches[0] : e).clientY;
+    return {
+      px: Math.max(0, Math.min(SE_SIZE - 1, Math.floor((cx - rect.left) / rect.width  * SE_SIZE))),
+      py: Math.max(0, Math.min(SE_SIZE - 1, Math.floor((cy - rect.top)  / rect.height * SE_SIZE))),
+    };
+  }
+
+  function sePaint(px, py) {
+    const frame = seSprites[seState.name].frames[seState.frame];
+    if (seState.tool === 'eraser') {
+      frame[py * SE_SIZE + px] = 0;
+    } else if (seState.tool === 'fill') {
+      const target = frame[py * SE_SIZE + px];
+      if (target !== seState.color) seFlood(frame, px, py, target, seState.color);
+    } else {
+      frame[py * SE_SIZE + px] = seState.color;
+    }
+    seRender();
+  }
+
+  function seFlood(frame, sx, sy, target, fill) {
+    const stack = [sy * SE_SIZE + sx];
+    const seen  = new Uint8Array(SE_SIZE * SE_SIZE);
+    while (stack.length) {
+      const i = stack.pop();
+      if (seen[i] || frame[i] !== target) continue;
+      seen[i] = 1; frame[i] = fill;
+      const x = i % SE_SIZE, y = (i / SE_SIZE) | 0;
+      if (x > 0)          stack.push(i - 1);
+      if (x < SE_SIZE-1)  stack.push(i + 1);
+      if (y > 0)          stack.push(i - SE_SIZE);
+      if (y < SE_SIZE-1)  stack.push(i + SE_SIZE);
+    }
+  }
+
+  function seRefreshSelect() {
+    const sel = document.getElementById('se-sprite-select');
+    sel.innerHTML = '';
+    for (const n of Object.keys(seSprites)) {
+      const o = document.createElement('option');
+      o.value = o.textContent = n;
+      if (n === seState.name) o.selected = true;
+      sel.appendChild(o);
+    }
+  }
+
+  function seBuildPalette() {
+    const c = document.getElementById('se-palette');
+    c.innerHTML = '';
+    SE_PALETTE.forEach((col, i) => {
+      const sw = document.createElement('div');
+      sw.className = 'se-swatch' + (i === 0 ? ' transp' : '') + (i === seState.color ? ' selected' : '');
+      if (col) sw.style.background = col;
+      sw.addEventListener('pointerdown', () => {
+        seState.color = i;
+        if (i !== 0) seState.tool = 'pencil';
+        document.querySelectorAll('.se-swatch').forEach(s => s.classList.remove('selected'));
+        sw.classList.add('selected');
+        seRefreshTools();
+      });
+      c.appendChild(sw);
+    });
+  }
+
+  function seRefreshTools() {
+    document.querySelectorAll('.se-tool').forEach(b => b.classList.remove('active'));
+    document.getElementById(`se-tool-${seState.tool}`).classList.add('active');
+  }
+
+  // Canvas input
+  seCanvas.addEventListener('pointerdown', e => {
+    e.preventDefault(); seState.painting = true;
+    seCanvas.setPointerCapture(e.pointerId);
+    const { px, py } = sePixelAt(e); sePaint(px, py);
+  });
+  seCanvas.addEventListener('pointermove', e => {
+    e.preventDefault();
+    if (seState.painting) { const { px, py } = sePixelAt(e); sePaint(px, py); }
+  });
+  seCanvas.addEventListener('pointerup', () => { seState.painting = false; });
+
+  // Open / close
+  document.getElementById('sprite-btn').addEventListener('click', () => {
+    seRefreshSelect(); seBuildPalette(); seRender();
+    document.getElementById('sprite-editor').classList.add('open');
+  });
+  document.getElementById('se-close').addEventListener('click', () => {
+    document.getElementById('sprite-editor').classList.remove('open');
+  });
+
+  // Sprite select / new
+  document.getElementById('se-sprite-select').addEventListener('change', e => {
+    seState.name = e.target.value; seState.frame = 0; seRender();
+  });
+  document.getElementById('se-sprite-new').addEventListener('click', () => {
+    const name = prompt('Sprite name:');
+    if (!name || seSprites[name]) return;
+    seSprites[name] = { frames: [new Uint8Array(SE_SIZE * SE_SIZE)] };
+    seState.name = name; seState.frame = 0;
+    seRefreshSelect(); seRender();
+  });
+
+  // Frame navigation
+  document.getElementById('se-frame-prev').addEventListener('click', () => {
+    const len = seSprites[seState.name].frames.length;
+    seState.frame = (seState.frame - 1 + len) % len; seRender();
+  });
+  document.getElementById('se-frame-next').addEventListener('click', () => {
+    const len = seSprites[seState.name].frames.length;
+    seState.frame = (seState.frame + 1) % len; seRender();
+  });
+  document.getElementById('se-frame-add').addEventListener('click', () => {
+    seSprites[seState.name].frames.splice(seState.frame + 1, 0, new Uint8Array(SE_SIZE * SE_SIZE));
+    seState.frame++; seRender();
+  });
+  document.getElementById('se-frame-del').addEventListener('click', () => {
+    const frames = seSprites[seState.name].frames;
+    if (frames.length === 1) return;
+    frames.splice(seState.frame, 1);
+    seState.frame = Math.min(seState.frame, frames.length - 1); seRender();
+  });
+
+  // Tools
+  ['pencil','eraser','fill'].forEach(t => {
+    document.getElementById(`se-tool-${t}`).addEventListener('click', () => {
+      seState.tool = t; seRefreshTools();
+    });
+  });
+
+  // Clear frame
+  document.getElementById('se-clear').addEventListener('click', () => {
+    seSprites[seState.name].frames[seState.frame].fill(0); seRender();
+  });
+
+  // Copy to clipboard
+  document.getElementById('se-copy').addEventListener('click', () => {
+    const sprite = seSprites[seState.name];
+    const data = {
+      palette: SE_PALETTE,
+      frames:  sprite.frames.map(f => Array.from(f)),
+    };
+    const js = `const SPRITE_${seState.name.toUpperCase()} = ${JSON.stringify(data, null, 2)};\n`;
+    navigator.clipboard.writeText(js).then(() => {
+      const btn = document.getElementById('se-copy');
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy JS'; }, 1500);
     });
   });
 
