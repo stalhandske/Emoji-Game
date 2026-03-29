@@ -325,16 +325,27 @@
         const cy = Math.max(ty, Math.min(ball.y, ty + T));
         const dx = ball.x - cx, dy = ball.y - cy;
         const dist2 = dx * dx + dy * dy;
-        if (dist2 < r * r && dist2 > 0) {
-          const dist = Math.sqrt(dist2);
-          const nx = dx / dist, ny = dy / dist;
-          ball.x += nx * (r - dist);
-          ball.y += ny * (r - dist);
-          const dot = ball.vx * nx + ball.vy * ny;
-          if (dot < 0) {
-            ball.vx -= (1 + PARAMS.BOUNCE) * dot * nx;
-            ball.vy -= (1 + PARAMS.BOUNCE) * dot * ny;
-          }
+        if (dist2 >= r * r || dist2 === 0) continue;
+
+        // Ghost-corner fix: if the closest point is a tile corner AND an
+        // adjacent tile in that corner's direction is also solid, this is an
+        // interior edge — skip it and let the neighbour's flat face handle it.
+        const onV = cx === tx || cx === tx + T;  // on a vertical edge
+        const onH = cy === ty || cy === ty + T;  // on a horizontal edge
+        if (onV && onH) {
+          const adjCol = cx === tx + T ? col + 1 : col - 1;
+          const adjRow = cy === ty + T ? row + 1 : row - 1;
+          if (getTile(adjCol, row) === ROCK || getTile(col, adjRow) === ROCK) continue;
+        }
+
+        const dist = Math.sqrt(dist2);
+        const nx = dx / dist, ny = dy / dist;
+        ball.x += nx * (r - dist);
+        ball.y += ny * (r - dist);
+        const dot = ball.vx * nx + ball.vy * ny;
+        if (dot < 0) {
+          ball.vx -= (1 + PARAMS.BOUNCE) * dot * nx;
+          ball.vy -= (1 + PARAMS.BOUNCE) * dot * ny;
         }
       }
     }
@@ -353,11 +364,16 @@
       ball.vy += (hdy / hdist) * pull;
     }
 
-    ball.x += ball.vx;
-    ball.y += ball.vy;
+    // Sub-step movement to prevent tunnelling at high speed.
+    // Each step moves the ball at most BALL_R pixels, then checks collisions.
+    const steps = Math.max(1, Math.ceil(Math.hypot(ball.vx, ball.vy) / PARAMS.BALL_R));
+    for (let i = 0; i < steps; i++) {
+      ball.x += ball.vx / steps;
+      ball.y += ball.vy / steps;
+      resolveCollisions();
+    }
     ball.vx *= PARAMS.FRICTION;
     ball.vy *= PARAMS.FRICTION;
-    resolveCollisions();
 
     // Enter cup only if ball isn't moving too fast (otherwise it skips over)
     const newDist = Math.hypot(HOLE_POS.x - ball.x, HOLE_POS.y - ball.y);
