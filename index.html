@@ -259,6 +259,8 @@
     HOLE_CUP_FORCE:      0.010,  // pull toward centre once inside the cup (px/frame²)
     HOLE_SINK_SPEED:     12.0,   // max entry speed — faster balls skip over the hole
     HOLE_FRICTION:       0.96,   // friction inside the cup (replaces FRICTION)
+    WIZARD_SPEED:        2.2,    // px per frame
+    WIZARD_CLEARANCE:    10,     // px — half-width clearance for path smoothing
   };
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -298,7 +300,6 @@
   let dragTo   = { x: 0, y: 0 };
 
   // Wizard character
-  const WIZARD_SPEED = 2.2; // px per frame
   let wizard = { x: BALL_START.x, y: BALL_START.y, path: [], walking: false };
 
   // Deterministic sand texture
@@ -383,13 +384,12 @@
 
   // LOS with clearance: tests three parallel rays (centre ± perpendicular offset)
   // so the wizard can't squeeze through gaps narrower than 2 × WIZARD_CLEARANCE.
-  const WIZARD_CLEARANCE = 10; // px — roughly half the wizard's visual width
   function hasLOS(x0, y0, x1, y1) {
     const dx = x1 - x0, dy = y1 - y0;
     const dist = Math.hypot(dx, dy);
     if (dist < 0.001) return true;
-    const px = (-dy / dist) * WIZARD_CLEARANCE;
-    const py = ( dx / dist) * WIZARD_CLEARANCE;
+    const px = (-dy / dist) * PARAMS.WIZARD_CLEARANCE;
+    const py = ( dx / dist) * PARAMS.WIZARD_CLEARANCE;
     return castRay(x0, y0, x1, y1) &&
            castRay(x0 + px, y0 + py, x1 + px, y1 + py) &&
            castRay(x0 - px, y0 - py, x1 - px, y1 - py);
@@ -460,13 +460,13 @@
     const target = wizard.path[0];
     const dx = target.x - wizard.x, dy = target.y - wizard.y;
     const dist = Math.hypot(dx, dy);
-    if (dist <= WIZARD_SPEED) {
+    if (dist <= PARAMS.WIZARD_SPEED) {
       wizard.x = target.x; wizard.y = target.y;
       wizard.path.shift();
       if (wizard.path.length === 0) wizard.walking = false;
     } else {
-      wizard.x += (dx / dist) * WIZARD_SPEED;
-      wizard.y += (dy / dist) * WIZARD_SPEED;
+      wizard.x += (dx / dist) * PARAMS.WIZARD_SPEED;
+      wizard.y += (dy / dist) * PARAMS.WIZARD_SPEED;
     }
   }
 
@@ -790,11 +790,19 @@
         { key:'STOP_SPEED', label:'Stop speed', min:0.05, max:3.0,   step:0.05,  digits:2 },
       ],
     },
+    wizard: {
+      label: '🧙 Wizard',
+      params: [
+        { key:'WIZARD_SPEED',     label:'Walk speed',  min:0.5, max:6.0, step:0.1, digits:1 },
+        { key:'WIZARD_CLEARANCE', label:'Clearance',   min:2,   max:18,  step:1,   digits:0 },
+      ],
+    },
   };
 
   function groupForPos(pos) {
     if (Math.hypot(pos.x - HOLE_POS.x,   pos.y - HOLE_POS.y)   < 50) return 'hole';
     if (Math.hypot(pos.x - BALL_START.x, pos.y - BALL_START.y) < 50) return 'shot';
+    if (Math.hypot(pos.x - wizard.x,     pos.y - wizard.y)     < 30) return 'wizard';
     if (getTile(Math.floor(pos.x / T), Math.floor(pos.y / T)) === ROCK) return 'physics';
     return 'physics';
   }
