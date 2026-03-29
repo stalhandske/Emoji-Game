@@ -372,17 +372,20 @@
 
   const SPRITE_PAL = [null,'#1A0E06','#3D2B1A','#7A5C3A','#C8A440','#F0C040','#E8B870','#D06820','#C03020','#FFFFFF','#C0C0C0','#808080','#8070C0','#4040A0','#4080C0','#406020'];
 
-  const SPRITE_FLAG   = { palette: SPRITE_PAL, frames: [[0,0,0,0,2,8,8,0,0,0,0,0,0,2,8,8,8,0,0,0,0,0,0,2,8,8,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0]] };
-  const SPRITE_BALL   = { palette: SPRITE_PAL, frames: [[0,0,0,1,1,1,0,0,0,0,0,1,6,6,6,1,0,0,0,1,6,6,6,6,6,1,0,1,6,6,6,6,6,6,6,1,1,6,6,6,6,6,6,6,1,1,6,6,6,6,6,6,6,1,0,1,6,6,6,6,6,1,0,0,0,1,6,6,6,1,0,0,0,0,0,1,1,1,0,0,0]] };
-  const SPRITE_WIZARD = { palette: SPRITE_PAL, frames: [[0,0,0,0,1,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,0,1,0,1,0,0,0,0,1,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0,1,0,0,0]] };
+  // Frames stored as 81-char hex strings (one hex digit per pixel, 0=transparent).
+  const SPRITE_FLAG   = { palette: SPRITE_PAL, frames: ["000028800000028880000028800000020000000020000000020000000020000000020000000020000"] };
+  const SPRITE_BALL   = { palette: SPRITE_PAL, frames: ["000111000001666100016666610166666661166666661166666661016666610001666100000111000"] };
+  const SPRITE_WIZARD = { palette: SPRITE_PAL, frames: ["000010000000101000000101000000010000000111000001010100001010100000101000000101000"] };
 
   // Draw a 9×9 sprite centred at (cx, cy). scale = game-px per sprite-px.
+  // Frames may be a hex string ("0a1f…") or a Uint8Array/plain array.
   function drawSprite(data, cx, cy, scale, frameIdx = 0) {
-    const frame = data.frames[frameIdx % data.frames.length];
-    const half  = 9 * scale / 2;
+    const raw  = data.frames[frameIdx % data.frames.length];
+    const half = 9 * scale / 2;
     for (let py = 0; py < 9; py++) {
       for (let px = 0; px < 9; px++) {
-        const ci = frame[py * 9 + px];
+        const i  = py * 9 + px;
+        const ci = typeof raw === 'string' ? parseInt(raw[i], 16) : raw[i];
         if (!ci) continue;
         ctx.fillStyle = data.palette[ci];
         ctx.fillRect(Math.round(cx - half + px * scale),
@@ -1036,11 +1039,26 @@
     '#406020', // 15 dark green
   ];
 
+  // Convert a game sprite (hex-string or array frames) → editor format (Uint8Arrays).
+  function seFromGameSprite(data) {
+    return {
+      frames: data.frames.map(raw => {
+        const arr = new Uint8Array(SE_SIZE * SE_SIZE);
+        for (let i = 0; i < arr.length; i++)
+          arr[i] = typeof raw === 'string' ? parseInt(raw[i], 16) : raw[i];
+        return arr;
+      }),
+    };
+  }
+
   // Sprite store: name → { frames: [Uint8Array(SE_SIZE²), …] }
+  // Pre-loaded from the game sprites so they're immediately editable.
   const seSprites = {
-    wizard: { frames: [new Uint8Array(SE_SIZE * SE_SIZE)] },
+    flag:   seFromGameSprite(SPRITE_FLAG),
+    ball:   seFromGameSprite(SPRITE_BALL),
+    wizard: seFromGameSprite(SPRITE_WIZARD),
   };
-  const seState = { name: 'wizard', frame: 0, color: 1, tool: 'pencil', painting: false };
+  const seState = { name: 'flag', frame: 0, color: 1, tool: 'pencil', painting: false };
 
   const seCanvas = document.getElementById('se-canvas');
   const seCtx    = seCanvas.getContext('2d');
@@ -1206,14 +1224,12 @@
     seSprites[seState.name].frames[seState.frame].fill(0); seRender();
   });
 
-  // Copy to clipboard
+  // Copy to clipboard — compact hex format (one char per pixel per frame).
   document.getElementById('se-copy').addEventListener('click', () => {
     const sprite = seSprites[seState.name];
-    const data = {
-      palette: SE_PALETTE,
-      frames:  sprite.frames.map(f => Array.from(f)),
-    };
-    const js = `const SPRITE_${seState.name.toUpperCase()} = ${JSON.stringify(data, null, 2)};\n`;
+    const hexFrames = sprite.frames.map(f => Array.from(f).map(ci => ci.toString(16)).join(''));
+    const framesStr = hexFrames.map(h => `"${h}"`).join(', ');
+    const js = `const SPRITE_${seState.name.toUpperCase()} = { palette: SPRITE_PAL, frames: [${framesStr}] };\n`;
     navigator.clipboard.writeText(js).then(() => {
       const btn = document.getElementById('se-copy');
       btn.textContent = 'Copied!';
