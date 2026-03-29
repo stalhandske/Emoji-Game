@@ -73,16 +73,23 @@
   const SAND = 0;
   const ROCK = 1;
 
-  // Physics
-  const BALL_R = 8;
-  const FRICTION = 0.97;
-  const MAX_DRAG = 120;
-  const POWER_SCALE = 0.115;
-  const STOP_SPEED = 0.25;
+  // ── Tuning knobs — easy to adjust ────────────────────────────────────────
+  const BALL_R       = 8;     // ball radius (px)
+  const FRICTION     = 0.97;  // velocity multiplier per frame (lower = more drag)
+  const MAX_DRAG     = 120;   // max drag distance (px) for full power
+  const POWER_SCALE  = 0.115; // drag px → launch speed (px/frame)
+  const STOP_SPEED   = 0.25;  // speed below which ball stops (px/frame)
+  const BOUNCE       = 0.75;  // wall bounce energy retention (0=dead, 1=elastic)
 
-  // Level positions (col, row) — ball top-left area, hole bottom-right
-  const BALL_START = { x: 2.5 * T, y: 2.5 * T };   //  (90, 90)
-  const HOLE_POS   = { x: 7.5 * T, y: 15.5 * T };  // (270, 558)
+  const HOLE_RADIUS  = 14;    // px — how close ball must get to sink
+  const HOLE_ATTRACT_RADIUS = 40;   // px — attraction kicks in within this range
+  const HOLE_ATTRACT_FORCE  = 0.18; // px/frame² — pull strength toward hole
+  const HOLE_SINK_SPEED     = 4.0;  // max speed at which ball still sinks
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // Level positions — tee at bottom, hole at top
+  const BALL_START = { x: 2.5 * T, y: 15.5 * T };  // (90, 558)
+  const HOLE_POS   = { x: 7.5 * T, y: 2.5 * T };   // (270, 90)
 
   const BASE_LEVEL = [
     [1,1,1,1,1,1,1,1,1,1],
@@ -160,10 +167,8 @@
           ball.y += ny * (r - dist);
           const dot = ball.vx * nx + ball.vy * ny;
           if (dot < 0) {
-            ball.vx -= 1.4 * dot * nx;
-            ball.vy -= 1.4 * dot * ny;
-            ball.vx *= 0.55;
-            ball.vy *= 0.55;
+            ball.vx -= (1 + BOUNCE) * dot * nx;
+            ball.vy -= (1 + BOUNCE) * dot * ny;
           }
         }
       }
@@ -172,29 +177,44 @@
 
   function update() {
     if (!ball.moving) return;
+
+    // Hole attraction
+    const hdx = HOLE_POS.x - ball.x, hdy = HOLE_POS.y - ball.y;
+    const hdist = Math.sqrt(hdx * hdx + hdy * hdy);
+    if (hdist < HOLE_ATTRACT_RADIUS && hdist > 0) {
+      const strength = HOLE_ATTRACT_FORCE * (1 - hdist / HOLE_ATTRACT_RADIUS);
+      ball.vx += (hdx / hdist) * strength;
+      ball.vy += (hdy / hdist) * strength;
+    }
+
     ball.x += ball.vx;
     ball.y += ball.vy;
     ball.vx *= FRICTION;
     ball.vy *= FRICTION;
     resolveCollisions();
+
+    // Sink check — ball enters hole if close enough AND not moving too fast
     const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+    if (hdist < HOLE_RADIUS && speed < HOLE_SINK_SPEED) {
+      ball.vx = 0; ball.vy = 0;
+      ball.moving = false;
+      sinkBall();
+      return;
+    }
+
     if (speed < STOP_SPEED) {
       ball.vx = 0; ball.vy = 0;
       ball.moving = false;
-      checkHole();
     }
   }
 
-  function checkHole() {
-    const dx = ball.x - HOLE_POS.x, dy = ball.y - HOLE_POS.y;
-    if (Math.sqrt(dx * dx + dy * dy) < 15) {
-      ball.x = HOLE_POS.x; ball.y = HOLE_POS.y;
-      won = true;
-      const diff = strokes - 5;
-      const tags = { '-4': 'Condor!!', '-3': 'Albatross!', '-2': 'Eagle!', '-1': 'Birdie!', '0': 'Par!', '1': 'Bogey', '2': 'Double Bogey' };
-      const tag = tags[diff] ?? `+${diff}`;
-      msgEl.textContent = `Hole in ${strokes}  —  ${tag}`;
-    }
+  function sinkBall() {
+    ball.x = HOLE_POS.x; ball.y = HOLE_POS.y;
+    won = true;
+    const diff = strokes - 5;
+    const tags = { '-4': 'Condor!!', '-3': 'Albatross!', '-2': 'Eagle!', '-1': 'Birdie!', '0': 'Par!', '1': 'Bogey', '2': 'Double Bogey' };
+    const tag = tags[diff] ?? `+${diff}`;
+    msgEl.textContent = `Hole in ${strokes}  —  ${tag}`;
   }
 
   function reset() {
