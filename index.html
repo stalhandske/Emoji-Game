@@ -297,6 +297,10 @@
   let dragFrom = { x: 0, y: 0 };
   let dragTo   = { x: 0, y: 0 };
 
+  // Wizard character
+  const WIZARD_SPEED = 2.2; // px per frame
+  let wizard = { x: BALL_START.x, y: BALL_START.y, path: [], walking: false };
+
   // Deterministic sand texture
   const sandDots = Array.from({ length: ROWS }, (_, r) =>
     Array.from({ length: COLS }, (_, c) =>
@@ -358,6 +362,63 @@
     }
   }
 
+  // ── Pathfinding (A*) ─────────────────────────────────────────────────────
+
+  function aStar(x0, y0, x1, y1) {
+    const c0 = Math.floor(x0 / T), r0 = Math.floor(y0 / T);
+    const c1 = Math.floor(x1 / T), r1 = Math.floor(y1 / T);
+    if (c0 === c1 && r0 === r1) return [];
+    const key = (c, r) => r * COLS + c;
+    const h   = (c, r) => Math.abs(c - c1) + Math.abs(r - r1);
+    const open = new Map();
+    const closed = new Set();
+    open.set(key(c0, r0), { c: c0, r: r0, g: 0, f: h(c0, r0), par: null });
+    while (open.size) {
+      let best = null;
+      for (const n of open.values()) if (!best || n.f < best.f) best = n;
+      if (best.c === c1 && best.r === r1) {
+        const path = [];
+        for (let n = best; n; n = n.par) path.unshift({ x: n.c * T + T / 2, y: n.r * T + T / 2 });
+        return path.slice(1); // skip starting tile
+      }
+      open.delete(key(best.c, best.r));
+      closed.add(key(best.c, best.r));
+      for (const [dc, dr] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+        const nc = best.c + dc, nr = best.r + dr;
+        if (getTile(nc, nr) === ROCK) continue;
+        const k = key(nc, nr);
+        if (closed.has(k)) continue;
+        const g = best.g + 1;
+        const ex = open.get(k);
+        if (!ex || g < ex.g) open.set(k, { c: nc, r: nr, g, f: g + h(nc, nr), par: best });
+      }
+    }
+    return []; // no path (shouldn't happen on a connected level)
+  }
+
+  function wizardStartWalk() {
+    const path = aStar(wizard.x, wizard.y, ball.x, ball.y);
+    wizard.path = path;
+    wizard.walking = path.length > 0;
+  }
+
+  function updateWizard() {
+    if (!wizard.walking) return;
+    const target = wizard.path[0];
+    const dx = target.x - wizard.x, dy = target.y - wizard.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= WIZARD_SPEED) {
+      wizard.x = target.x; wizard.y = target.y;
+      wizard.path.shift();
+      if (wizard.path.length === 0) wizard.walking = false;
+    } else {
+      wizard.x += (dx / dist) * WIZARD_SPEED;
+      wizard.y += (dy / dist) * WIZARD_SPEED;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   function update() {
     if (!ball.moving) return;
     if (ball.inHole) { updateInHole(); return; }
@@ -392,6 +453,7 @@
 
     if (speed < PARAMS.STOP_SPEED) {
       ball.vx = 0; ball.vy = 0; ball.moving = false;
+      wizardStartWalk();
     }
   }
 
@@ -431,6 +493,7 @@
   }
 
   function sinkBall() {
+    wizardStartWalk();
     won = true;
     const diff = strokes - 5;
     const tags = { '-4':'Condor!!', '-3':'Albatross!', '-2':'Eagle!', '-1':'Birdie!', '0':'Par!', '1':'Bogey', '2':'Double Bogey' };
@@ -440,6 +503,7 @@
 
   function reset() {
     ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
+    wizard.x = BALL_START.x; wizard.y = BALL_START.y; wizard.path = []; wizard.walking = false;
     strokes = 0; won = false; aiming = false;
     strokesEl.textContent = '0'; msgEl.textContent = '';
     level = cloneLevel();
@@ -508,8 +572,21 @@
     ctx.strokeStyle = '#909090'; ctx.lineWidth = 0.8; ctx.stroke();
   }
 
+  function drawWizard() {
+    const { x, y } = wizard;
+    ctx.save();
+    ctx.font = '22px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    // drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillText('🧙', x + 2, y + 5);
+    ctx.fillText('🧙', x, y + 2);
+    ctx.restore();
+  }
+
   function drawAim() {
-    if (!aiming || ball.moving || won || editMode) return;
+    if (!aiming || ball.moving || won || wizard.walking || editMode) return;
     const dx = dragTo.x - dragFrom.x, dy = dragTo.y - dragFrom.y;
     const len = Math.hypot(dx, dy);
     if (len < 4) return;
@@ -576,12 +653,13 @@
     drawTiles();
     drawHole();
     drawTee();
+    drawWizard();
     drawAim();
     drawBall();
     drawEditOverlay();
   }
 
-  function gameLoop() { update(); draw(); requestAnimationFrame(gameLoop); }
+  function gameLoop() { update(); updateWizard(); draw(); requestAnimationFrame(gameLoop); }
 
   // ── Input ─────────────────────────────────────────────────────────────────
 
@@ -596,23 +674,23 @@
   canvas.addEventListener('mousedown', e => {
     e.preventDefault();
     if (editMode) { openPanelForPos(canvasPos(e)); return; }
-    if (won || ball.moving) return;
+    if (won || ball.moving || wizard.walking) return;
     aiming = true; dragFrom = dragTo = canvasPos(e);
   });
   window.addEventListener('mousemove', e => { if (aiming) dragTo = canvasPos(e); });
-  window.addEventListener('mouseup', () => { if (aiming && !ball.moving && !won) { aiming = false; shoot(); } });
+  window.addEventListener('mouseup', () => { if (aiming && !ball.moving && !won && !wizard.walking) { aiming = false; shoot(); } });
 
   canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     if (editMode) { openPanelForPos(canvasPos(e.touches[0])); return; }
-    if (won || ball.moving) return;
+    if (won || ball.moving || wizard.walking) return;
     aiming = true; dragFrom = dragTo = canvasPos(e.touches[0]);
   }, { passive: false });
   canvas.addEventListener('touchmove', e => {
     e.preventDefault(); if (aiming) dragTo = canvasPos(e.touches[0]);
   }, { passive: false });
   canvas.addEventListener('touchend', e => {
-    e.preventDefault(); if (aiming && !ball.moving && !won) { aiming = false; shoot(); }
+    e.preventDefault(); if (aiming && !ball.moving && !won && !wizard.walking) { aiming = false; shoot(); }
   }, { passive: false });
 
   function shoot() {
