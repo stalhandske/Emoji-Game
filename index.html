@@ -330,12 +330,19 @@
         // Ghost-corner fix: if the closest point is a tile corner AND an
         // adjacent tile in that corner's direction is also solid, this is an
         // interior edge — skip it and let the neighbour's flat face handle it.
+        // Only applies when the ball is in the diagonal region (outside the tile
+        // in BOTH axes). If the ball is outside in only one axis, the corner is
+        // just the clamped end of a flat face — treat it as a normal face hit.
         const onV = cx === tx || cx === tx + T;  // on a vertical edge
         const onH = cy === ty || cy === ty + T;  // on a horizontal edge
         if (onV && onH) {
-          const adjCol = cx === tx + T ? col + 1 : col - 1;
-          const adjRow = cy === ty + T ? row + 1 : row - 1;
-          if (getTile(adjCol, row) === ROCK || getTile(col, adjRow) === ROCK) continue;
+          const outsideX = ball.x < tx || ball.x > tx + T;
+          const outsideY = ball.y < ty || ball.y > ty + T;
+          if (outsideX && outsideY) {
+            const adjCol = cx === tx + T ? col + 1 : col - 1;
+            const adjRow = cy === ty + T ? row + 1 : row - 1;
+            if (getTile(adjCol, row) === ROCK || getTile(col, adjRow) === ROCK) continue;
+          }
         }
 
         const dist = Math.sqrt(dist2);
@@ -730,6 +737,30 @@
       setTimeout(() => { btn.textContent = '📋 Copy values'; btn.classList.remove('copied'); }, 2000);
     });
   });
+
+  // ── Test API ─────────────────────────────────────────────────────────────
+  // Exposes internals for physics tests (harmless in production).
+  window.__golf = {
+    step: update,
+    getball: () => ({ x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, moving: ball.moving, inHole: ball.inHole }),
+    setball: s => Object.assign(ball, { inHole: false, moving: true }, s),
+    resetWon: () => { won = false; },
+    ballOverlapsRock() {
+      const r = PARAMS.BALL_R;
+      for (let row = Math.floor((ball.y - r) / T); row <= Math.floor((ball.y + r) / T); row++) {
+        for (let col = Math.floor((ball.x - r) / T); col <= Math.floor((ball.x + r) / T); col++) {
+          if (getTile(col, row) !== ROCK) continue;
+          const tx = col * T, ty = row * T;
+          const cx = Math.max(tx, Math.min(ball.x, tx + T));
+          const cy = Math.max(ty, Math.min(ball.y, ty + T));
+          const dx = ball.x - cx, dy = ball.y - cy;
+          if (dx * dx + dy * dy < r * r) return true;
+        }
+      }
+      return false;
+    },
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   gameLoop();
   </script>
