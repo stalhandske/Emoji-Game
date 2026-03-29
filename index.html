@@ -631,10 +631,15 @@
     ctx.font = '22px serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    // drop shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.fillText('🧙', x + 2, y + 5);
-    ctx.fillText('🧙', x, y + 2);
+    // shadow (dark, slightly offset)
+    ctx.globalAlpha = 0.35;
+    ctx.filter = 'blur(1px)';
+    ctx.fillStyle = '#000';
+    ctx.fillText('🧙', x + 2, y + 4);
+    // character
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
+    ctx.fillText('🧙', x, y);
     ctx.restore();
   }
 
