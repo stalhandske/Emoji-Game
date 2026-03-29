@@ -152,10 +152,27 @@
     .param-value {
       color: #F0C040;
       font-size: 12px;
-      width: 46px;
-      text-align: right;
+      width: 38px;
+      text-align: center;
       flex-shrink: 0;
     }
+    .param-nudge {
+      width: 28px;
+      height: 28px;
+      border-radius: 3px;
+      background: rgba(60, 40, 8, 0.8);
+      border: 1px solid #6B5030;
+      color: #F0C040;
+      font-size: 15px;
+      cursor: pointer;
+      flex-shrink: 0;
+      line-height: 1;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .param-nudge:active { background: rgba(100, 70, 15, 0.95); }
 
     #edit-copy-btn {
       width: 100%;
@@ -638,29 +655,32 @@
     const container = document.getElementById('edit-sliders');
     container.innerHTML = '';
     for (const p of group.params) {
-      const val = PARAMS[p.key];
       const row = document.createElement('div');
       row.className = 'param-row';
       row.innerHTML =
         `<span class="param-label">${p.label}</span>` +
-        `<input type="range" class="param-slider" min="${p.min}" max="${p.max}" step="${p.step}" value="${val}">` +
-        `<span class="param-value" id="pv-${p.key}">${val.toFixed(p.digits)}</span>`;
+        `<input type="range" class="param-slider" min="${p.min}" max="${p.max}" step="${p.step}" value="${PARAMS[p.key]}">` +
+        `<button class="param-nudge">−</button>` +
+        `<span class="param-value" id="pv-${p.key}">${PARAMS[p.key].toFixed(p.digits)}</span>` +
+        `<button class="param-nudge">+</button>`;
       container.appendChild(row);
+
       const slider = row.querySelector('input');
-      slider.addEventListener('input', () => {
-        const v = parseFloat(slider.value);
+      const [minusBtn, plusBtn] = row.querySelectorAll('.param-nudge');
+
+      const applyValue = v => {
+        // Extend range before clamping if the nudge goes out of bounds
+        if (v > p.max) { p.max = +(p.max + (p.max - p.min) * 0.5).toFixed(p.digits); slider.max = p.max; }
+        if (v < p.min) { p.min = +Math.max(0, p.min - (p.max - p.min) * 0.5).toFixed(p.digits); slider.min = p.min; }
+        v = Math.max(p.min, Math.min(p.max, +v.toFixed(p.digits + 3)));
         PARAMS[p.key] = v;
+        slider.value = v;
         document.getElementById(`pv-${p.key}`).textContent = v.toFixed(p.digits);
-        // Auto-extend range when slider hits the edge
-        const span = p.max - p.min;
-        if (v >= p.max) {
-          p.max = +(p.max + span * 0.5).toFixed(p.digits);
-          slider.max = p.max;
-        } else if (v <= p.min) {
-          p.min = +Math.max(0, p.min - span * 0.5).toFixed(p.digits);
-          slider.min = p.min;
-        }
-      });
+      };
+
+      slider.addEventListener('input', () => applyValue(parseFloat(slider.value)));
+      minusBtn.addEventListener('click', () => applyValue(PARAMS[p.key] - p.step));
+      plusBtn.addEventListener('click',  () => applyValue(PARAMS[p.key] + p.step));
     }
     editPanel.classList.add('open');
   }
