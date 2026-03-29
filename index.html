@@ -368,6 +368,29 @@
   // Grid
   const T = 36, COLS = 10, ROWS = 18, SAND = 0, ROCK = 1;
 
+  // ── Sprites (exported from in-game editor) ───────────────────────────────
+
+  const SPRITE_PAL = [null,'#1A0E06','#3D2B1A','#7A5C3A','#C8A440','#F0C040','#E8B870','#D06820','#C03020','#FFFFFF','#C0C0C0','#808080','#8070C0','#4040A0','#4080C0','#406020'];
+
+  const SPRITE_FLAG   = { palette: SPRITE_PAL, frames: [[0,0,0,0,2,8,8,0,0,0,0,0,0,2,8,8,8,0,0,0,0,0,0,2,8,8,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,2,0,0,0]] };
+  const SPRITE_BALL   = { palette: SPRITE_PAL, frames: [[0,0,0,1,1,1,0,0,0,0,0,1,6,6,6,1,0,0,0,1,6,6,6,6,6,1,0,1,6,6,6,6,6,6,6,1,1,6,6,6,6,6,6,6,1,1,6,6,6,6,6,6,6,1,0,1,6,6,6,6,6,1,0,0,0,1,6,6,6,1,0,0,0,0,0,1,1,1,0,0,0]] };
+  const SPRITE_WIZARD = { palette: SPRITE_PAL, frames: [[0,0,0,0,1,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,1,0,1,0,1,0,0,0,0,1,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0,0,1,0,1,0,0,0]] };
+
+  // Draw a 9×9 sprite centred at (cx, cy). scale = game-px per sprite-px.
+  function drawSprite(data, cx, cy, scale, frameIdx = 0) {
+    const frame = data.frames[frameIdx % data.frames.length];
+    const half  = 9 * scale / 2;
+    for (let py = 0; py < 9; py++) {
+      for (let px = 0; px < 9; px++) {
+        const ci = frame[py * 9 + px];
+        if (!ci) continue;
+        ctx.fillStyle = data.palette[ci];
+        ctx.fillRect(Math.round(cx - half + px * scale),
+                     Math.round(cy - half + py * scale), scale, scale);
+      }
+    }
+  }
+
   // ── Tuning knobs ─────────────────────────────────────────────────────────
   // Edit live with the ⚙ button; copy and paste the values back to lock them in.
   const PARAMS = {
@@ -721,10 +744,8 @@
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
     ctx.fillStyle = '#0E0905'; ctx.fill();
     ctx.strokeStyle = '#2A1F0A'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.strokeStyle = '#C8AA60'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(x+1, y - r + 3); ctx.lineTo(x+1, y - r - 22); ctx.stroke();
-    ctx.fillStyle = '#D03020';
-    ctx.beginPath(); ctx.moveTo(x+1,y-r-22); ctx.lineTo(x+16,y-r-15); ctx.lineTo(x+1,y-r-8); ctx.closePath(); ctx.fill();
+    // Flag sprite — bottom row sits on the cup rim
+    drawSprite(SPRITE_FLAG, x, y - r - 9 * 4 / 2 + 4, 4);
   }
 
   function drawTee() {
@@ -739,32 +760,17 @@
   }
 
   function drawBall() {
-    const { x, y } = ball;
-    ctx.beginPath(); ctx.arc(x+2, y+3, PARAMS.BALL_R, 0, Math.PI*2);
+    // Shadow
+    ctx.beginPath(); ctx.arc(ball.x + 2, ball.y + 3, PARAMS.BALL_R, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill();
-    const g = ctx.createRadialGradient(x-2, y-2, 1, x, y, PARAMS.BALL_R);
-    g.addColorStop(0, '#FFF'); g.addColorStop(0.6, '#E8E8E0'); g.addColorStop(1, '#B8B8B0');
-    ctx.beginPath(); ctx.arc(x, y, PARAMS.BALL_R, 0, Math.PI*2);
-    ctx.fillStyle = g; ctx.fill();
-    ctx.strokeStyle = '#909090'; ctx.lineWidth = 0.8; ctx.stroke();
+    drawSprite(SPRITE_BALL, ball.x, ball.y, 2);
   }
 
   function drawWizard() {
-    const { x, y } = wizard;
-    ctx.save();
-    ctx.font = '22px serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'alphabetic';
-    // shadow (dark, slightly offset)
-    ctx.globalAlpha = 0.35;
-    ctx.filter = 'blur(1px)';
-    ctx.fillStyle = '#000';
-    ctx.fillText('🧙', x + 2, y + 4);
-    // character
-    ctx.globalAlpha = 1;
-    ctx.filter = 'none';
-    ctx.fillText('🧙', x, y);
-    ctx.restore();
+    // Shadow
+    ctx.beginPath(); ctx.arc(wizard.x + 2, wizard.y + 3, 9, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fill();
+    drawSprite(SPRITE_WIZARD, wizard.x, wizard.y, 4);
   }
 
   function drawAim() {
