@@ -228,18 +228,19 @@
   const T = 36, COLS = 10, ROWS = 18, SAND = 0, ROCK = 1;
 
   // ── Tuning knobs ─────────────────────────────────────────────────────────
-  // These are `let` so the in-game editor can modify them at runtime.
-  // Hit ⚙ to adjust; copy the values and paste them here to make permanent.
-  let BALL_R              = 8;      // ball radius (px)
-  let FRICTION            = 0.97;   // velocity × per frame  (lower = more drag)
-  let MAX_DRAG            = 120;    // max drag length for full power (px)
-  let POWER_SCALE         = 0.115;  // drag px → launch speed (px/frame)
-  let STOP_SPEED          = 0.25;   // speed at which ball comes to rest
-  let BOUNCE              = 0.75;   // wall energy retention (0 = dead, 1 = elastic)
-  let HOLE_RADIUS         = 14;     // sink if ball centre is within this (px)
-  let HOLE_ATTRACT_RADIUS = 40;     // gravity well starts at this distance (px)
-  let HOLE_ATTRACT_FORCE  = 0.18;   // peak pull acceleration (px/frame²)
-  let HOLE_SINK_SPEED     = 4.0;    // max speed that still allows sinking
+  // Edit live with the ⚙ button; copy and paste the values back to lock them in.
+  const PARAMS = {
+    BALL_R:              8,      // ball radius (px)
+    FRICTION:            0.97,   // velocity × per frame  (lower = more drag)
+    MAX_DRAG:            120,    // max drag length for full power (px)
+    POWER_SCALE:         0.115,  // drag px → launch speed (px/frame)
+    STOP_SPEED:          0.25,   // speed at which ball comes to rest
+    BOUNCE:              0.75,   // wall energy retention (0 = dead, 1 = elastic)
+    HOLE_RADIUS:         14,     // sink if ball centre is within this (px)
+    HOLE_ATTRACT_RADIUS: 40,     // gravity well starts at this distance (px)
+    HOLE_ATTRACT_FORCE:  0.18,   // peak pull acceleration (px/frame²)
+    HOLE_SINK_SPEED:     4.0,    // max speed that still allows sinking
+  };
   // ─────────────────────────────────────────────────────────────────────────
 
   // Positions — tee bottom-left, hole top-right
@@ -296,7 +297,7 @@
   // ── Physics ───────────────────────────────────────────────────────────────
 
   function resolveCollisions() {
-    const r = BALL_R;
+    const r = PARAMS.BALL_R;
     for (let row = Math.floor((ball.y - r) / T); row <= Math.floor((ball.y + r) / T); row++) {
       for (let col = Math.floor((ball.x - r) / T); col <= Math.floor((ball.x + r) / T); col++) {
         if (getTile(col, row) !== ROCK) continue;
@@ -312,8 +313,8 @@
           ball.y += ny * (r - dist);
           const dot = ball.vx * nx + ball.vy * ny;
           if (dot < 0) {
-            ball.vx -= (1 + BOUNCE) * dot * nx;
-            ball.vy -= (1 + BOUNCE) * dot * ny;
+            ball.vx -= (1 + PARAMS.BOUNCE) * dot * nx;
+            ball.vy -= (1 + PARAMS.BOUNCE) * dot * ny;
           }
         }
       }
@@ -326,25 +327,25 @@
     // Hole attraction
     const hdx = HOLE_POS.x - ball.x, hdy = HOLE_POS.y - ball.y;
     const hdist = Math.hypot(hdx, hdy);
-    if (hdist < HOLE_ATTRACT_RADIUS && hdist > 0) {
-      const pull = HOLE_ATTRACT_FORCE * (1 - hdist / HOLE_ATTRACT_RADIUS);
+    if (hdist < PARAMS.HOLE_ATTRACT_RADIUS && hdist > 0) {
+      const pull = PARAMS.HOLE_ATTRACT_FORCE * (1 - hdist / PARAMS.HOLE_ATTRACT_RADIUS);
       ball.vx += (hdx / hdist) * pull;
       ball.vy += (hdy / hdist) * pull;
     }
 
     ball.x += ball.vx;
     ball.y += ball.vy;
-    ball.vx *= FRICTION;
-    ball.vy *= FRICTION;
+    ball.vx *= PARAMS.FRICTION;
+    ball.vy *= PARAMS.FRICTION;
     resolveCollisions();
 
     const speed = Math.hypot(ball.vx, ball.vy);
 
-    if (hdist < HOLE_RADIUS && speed < HOLE_SINK_SPEED) {
+    if (hdist < PARAMS.HOLE_RADIUS && speed < PARAMS.HOLE_SINK_SPEED) {
       ball.vx = 0; ball.vy = 0; ball.moving = false;
       sinkBall(); return;
     }
-    if (speed < STOP_SPEED) {
+    if (speed < PARAMS.STOP_SPEED) {
       ball.vx = 0; ball.vy = 0; ball.moving = false;
     }
   }
@@ -417,11 +418,11 @@
 
   function drawBall() {
     const { x, y } = ball;
-    ctx.beginPath(); ctx.arc(x+2, y+3, BALL_R, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(x+2, y+3, PARAMS.BALL_R, 0, Math.PI*2);
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill();
-    const g = ctx.createRadialGradient(x-2, y-2, 1, x, y, BALL_R);
+    const g = ctx.createRadialGradient(x-2, y-2, 1, x, y, PARAMS.BALL_R);
     g.addColorStop(0, '#FFF'); g.addColorStop(0.6, '#E8E8E0'); g.addColorStop(1, '#B8B8B0');
-    ctx.beginPath(); ctx.arc(x, y, BALL_R, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(x, y, PARAMS.BALL_R, 0, Math.PI*2);
     ctx.fillStyle = g; ctx.fill();
     ctx.strokeStyle = '#909090'; ctx.lineWidth = 0.8; ctx.stroke();
   }
@@ -431,7 +432,7 @@
     const dx = dragTo.x - dragFrom.x, dy = dragTo.y - dragFrom.y;
     const len = Math.hypot(dx, dy);
     if (len < 4) return;
-    const clamped = Math.min(len, MAX_DRAG), t = clamped / MAX_DRAG;
+    const clamped = Math.min(len, PARAMS.MAX_DRAG), t = clamped / PARAMS.MAX_DRAG;
     const lx = -dx / len, ly = -dy / len;
     ctx.save();
     ctx.strokeStyle = `rgba(200,160,60,${0.3+0.4*t})`;
@@ -450,7 +451,7 @@
     ctx.closePath(); ctx.fill();
     ctx.beginPath(); ctx.arc(dragTo.x, dragTo.y, 5, 0, Math.PI*2);
     ctx.fillStyle = `rgba(200,160,50,${0.4+0.4*t})`; ctx.fill();
-    const bx = ball.x - 28, by = ball.y + BALL_R + 8;
+    const bx = ball.x - 28, by = ball.y + PARAMS.BALL_R + 8;
     ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(bx, by, 56, 6);
     ctx.fillStyle = `rgb(${Math.floor(60+195*t)},${Math.floor(200-170*t)},40)`;
     ctx.fillRect(bx, by, 56*t, 6);
@@ -537,7 +538,7 @@
     const dx = dragTo.x - dragFrom.x, dy = dragTo.y - dragFrom.y;
     const len = Math.hypot(dx, dy);
     if (len < 6) return;
-    const speed = Math.min(len, MAX_DRAG) * POWER_SCALE;
+    const speed = Math.min(len, PARAMS.MAX_DRAG) * PARAMS.POWER_SCALE;
     ball.vx = -(dx/len)*speed; ball.vy = -(dy/len)*speed;
     ball.moving = true; strokes++; strokesEl.textContent = strokes;
   }
@@ -594,7 +595,7 @@
     const container = document.getElementById('edit-sliders');
     container.innerHTML = '';
     for (const p of group.params) {
-      const val = window[p.key];
+      const val = PARAMS[p.key];
       const row = document.createElement('div');
       row.className = 'param-row';
       row.innerHTML =
@@ -605,7 +606,7 @@
       const slider = row.querySelector('input');
       slider.addEventListener('input', () => {
         const v = parseFloat(slider.value);
-        window[p.key] = v;
+        PARAMS[p.key] = v;
         document.getElementById(`pv-${p.key}`).textContent = v.toFixed(p.digits);
       });
     }
@@ -629,7 +630,7 @@
     const allParams = Object.values(PARAM_GROUPS).flatMap(g => g.params);
     const maxKeyLen = Math.max(...allParams.map(p => p.key.length));
     const lines = allParams.map(p => {
-      const v = window[p.key];
+      const v = PARAMS[p.key];
       const padded = p.key.padEnd(maxKeyLen);
       return `let ${padded} = ${v.toFixed(p.digits)};`;
     });
