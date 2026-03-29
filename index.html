@@ -365,7 +365,7 @@
   // ── Pathfinding (A* + string-pull smoothing) ────────────────────────────
 
   // Amanatides-Woo grid ray: returns true if no ROCK tile intersects the segment.
-  function hasLOS(x0, y0, x1, y1) {
+  function castRay(x0, y0, x1, y1) {
     const dx = x1 - x0, dy = y1 - y0;
     let c = Math.floor(x0 / T), r = Math.floor(y0 / T);
     const c1 = Math.floor(x1 / T), r1 = Math.floor(y1 / T);
@@ -379,6 +379,20 @@
       if (c === c1 && r === r1) return true;
       if (tmc < tmr) { c += sc; tmc += tdc; } else { r += sr; tmr += tdr; }
     }
+  }
+
+  // LOS with clearance: tests three parallel rays (centre ± perpendicular offset)
+  // so the wizard can't squeeze through gaps narrower than 2 × WIZARD_CLEARANCE.
+  const WIZARD_CLEARANCE = 10; // px — roughly half the wizard's visual width
+  function hasLOS(x0, y0, x1, y1) {
+    const dx = x1 - x0, dy = y1 - y0;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 0.001) return true;
+    const px = (-dy / dist) * WIZARD_CLEARANCE;
+    const py = ( dx / dist) * WIZARD_CLEARANCE;
+    return castRay(x0, y0, x1, y1) &&
+           castRay(x0 + px, y0 + py, x1 + px, y1 + py) &&
+           castRay(x0 - px, y0 - py, x1 - px, y1 - py);
   }
 
   function aStar(x0, y0, x1, y1) {
