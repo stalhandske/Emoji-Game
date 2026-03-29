@@ -67,21 +67,42 @@
       background: rgba(80, 50, 10, 0.85);
     }
 
-    /* ── Slide-up param panel ── */
+    /* ── Slide-up param panel (fixed so it's never clipped by game-wrap) ── */
     #edit-panel {
-      position: absolute;
+      position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      background: rgba(12, 7, 2, 0.96);
+      background: rgba(12, 7, 2, 0.97);
       border-top: 2px solid #6B5030;
       padding: 10px 14px 14px;
       transform: translateY(100%);
       transition: transform 0.2s ease;
-      z-index: 20;
-      max-height: 72%;
+      z-index: 100;
+      max-height: 55vh;
       overflow-y: auto;
     }
+
+    /* ── Restart overlay button ── */
+    #restart-btn {
+      position: absolute;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 14px 32px;
+      background: rgba(60, 40, 8, 0.92);
+      border: 2px solid #F0C040;
+      border-radius: 4px;
+      color: #F0C040;
+      font-size: 14px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      font-family: 'Courier New', monospace;
+      cursor: pointer;
+      display: none;
+      z-index: 10;
+    }
+    #restart-btn.visible { display: block; }
     #edit-panel.open { transform: translateY(0); }
 
     #edit-panel-header {
@@ -176,17 +197,17 @@
 
   <div id="game-wrap">
     <canvas id="game" width="360" height="648"></canvas>
-
     <button id="edit-btn" title="Adjust parameters">⚙</button>
+    <button id="restart-btn">Play again</button>
+  </div>
 
-    <div id="edit-panel">
-      <div id="edit-panel-header">
-        <span id="edit-panel-title">Parameters</span>
-        <button id="edit-panel-close">✕</button>
-      </div>
-      <div id="edit-sliders"></div>
-      <button id="edit-copy-btn">📋 Copy values</button>
+  <div id="edit-panel">
+    <div id="edit-panel-header">
+      <span id="edit-panel-title">Parameters</span>
+      <button id="edit-panel-close">✕</button>
     </div>
+    <div id="edit-sliders"></div>
+    <button id="edit-copy-btn">📋 Copy values</button>
   </div>
 
   <div id="msg"></div>
@@ -195,12 +216,13 @@
   <script>
   'use strict';
 
-  const canvas    = document.getElementById('game');
-  const ctx       = canvas.getContext('2d');
-  const strokesEl = document.getElementById('strokes');
-  const msgEl     = document.getElementById('msg');
-  const editBtn   = document.getElementById('edit-btn');
-  const editPanel = document.getElementById('edit-panel');
+  const canvas     = document.getElementById('game');
+  const ctx        = canvas.getContext('2d');
+  const strokesEl  = document.getElementById('strokes');
+  const msgEl      = document.getElementById('msg');
+  const editBtn    = document.getElementById('edit-btn');
+  const editPanel  = document.getElementById('edit-panel');
+  const restartBtn = document.getElementById('restart-btn');
 
   // Grid
   const T = 36, COLS = 10, ROWS = 18, SAND = 0, ROCK = 1;
@@ -332,6 +354,7 @@
     const diff = strokes - 5;
     const tags = { '-4':'Condor!!', '-3':'Albatross!', '-2':'Eagle!', '-1':'Birdie!', '0':'Par!', '1':'Bogey', '2':'Double Bogey' };
     msgEl.textContent = `Hole in ${strokes}  —  ${tags[diff] ?? `+${diff}`}`;
+    restartBtn.classList.add('visible');
   }
 
   function reset() {
@@ -339,6 +362,7 @@
     strokes = 0; won = false; aiming = false;
     strokesEl.textContent = '0'; msgEl.textContent = '';
     level = cloneLevel();
+    restartBtn.classList.remove('visible');
   }
 
   // ── Drawing ───────────────────────────────────────────────────────────────
@@ -598,6 +622,7 @@
     if (!editMode) closePanel();
   });
   document.getElementById('edit-panel-close').addEventListener('click', closePanel);
+  restartBtn.addEventListener('click', reset);
 
   // Copy all current values as const declarations
   document.getElementById('edit-copy-btn').addEventListener('click', () => {
