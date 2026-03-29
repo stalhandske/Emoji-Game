@@ -231,15 +231,14 @@
   // Edit live with the ⚙ button; copy and paste the values back to lock them in.
   const PARAMS = {
     BALL_R:              8,      // ball radius (px)
-    FRICTION:            0.97,   // velocity × per frame  (lower = more drag)
+    FRICTION:            0.970,  // velocity × per frame  (lower = more drag)
     MAX_DRAG:            120,    // max drag length for full power (px)
     POWER_SCALE:         0.115,  // drag px → launch speed (px/frame)
     STOP_SPEED:          0.25,   // speed at which ball comes to rest
     BOUNCE:              0.75,   // wall energy retention (0 = dead, 1 = elastic)
-    HOLE_RADIUS:         14,     // sink if ball centre is within this (px)
-    HOLE_ATTRACT_RADIUS: 40,     // gravity well starts at this distance (px)
-    HOLE_ATTRACT_FORCE:  0.18,   // peak pull acceleration (px/frame²)
-    HOLE_SINK_SPEED:     4.0,    // max speed that still allows sinking
+    HOLE_RADIUS:         8,      // cup radius for ball centre (px); visual cup = this + BALL_R
+    HOLE_ATTRACT_RADIUS: 21,     // gravity well starts at this distance (px)
+    HOLE_ATTRACT_FORCE:  0.600,  // peak pull acceleration (px/frame²)
   };
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -271,7 +270,7 @@
   function cloneLevel() { return BASE_LEVEL.map(r => r.slice()); }
   let level = cloneLevel();
 
-  let ball    = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false };
+  let ball    = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
   let strokes = 0;
   let won     = false;
   let aiming  = false;
@@ -323,6 +322,7 @@
 
   function update() {
     if (!ball.moving) return;
+    if (ball.inHole) { updateInHole(); return; }
 
     // Hole attraction
     const hdx = HOLE_POS.x - ball.x, hdy = HOLE_POS.y - ball.y;
@@ -339,19 +339,56 @@
     ball.vy *= PARAMS.FRICTION;
     resolveCollisions();
 
-    const speed = Math.hypot(ball.vx, ball.vy);
-
-    if (hdist < PARAMS.HOLE_RADIUS && speed < PARAMS.HOLE_SINK_SPEED) {
-      ball.vx = 0; ball.vy = 0; ball.moving = false;
-      sinkBall(); return;
+    // Enter cup — any speed, just needs to reach the rim
+    const newDist = Math.hypot(HOLE_POS.x - ball.x, HOLE_POS.y - ball.y);
+    if (newDist < PARAMS.HOLE_RADIUS) {
+      ball.inHole = true;
+      return;
     }
+
+    const speed = Math.hypot(ball.vx, ball.vy);
     if (speed < PARAMS.STOP_SPEED) {
       ball.vx = 0; ball.vy = 0; ball.moving = false;
     }
   }
 
+  // Ball is inside the cup — bounce off circular wall until it comes to rest
+  function updateInHole() {
+    // Pull toward centre
+    const hdx = HOLE_POS.x - ball.x, hdy = HOLE_POS.y - ball.y;
+    const hdist = Math.hypot(hdx, hdy);
+    if (hdist > 0) {
+      ball.vx += (hdx / hdist) * PARAMS.HOLE_ATTRACT_FORCE;
+      ball.vy += (hdy / hdist) * PARAMS.HOLE_ATTRACT_FORCE;
+    }
+
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+    ball.vx *= PARAMS.FRICTION;
+    ball.vy *= PARAMS.FRICTION;
+
+    // Circular cup wall
+    const dx = ball.x - HOLE_POS.x, dy = ball.y - HOLE_POS.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > PARAMS.HOLE_RADIUS && dist > 0) {
+      const nx = dx / dist, ny = dy / dist;
+      ball.x = HOLE_POS.x + nx * PARAMS.HOLE_RADIUS;
+      ball.y = HOLE_POS.y + ny * PARAMS.HOLE_RADIUS;
+      const dot = ball.vx * nx + ball.vy * ny;
+      if (dot > 0) {
+        ball.vx -= (1 + PARAMS.BOUNCE * 0.35) * dot * nx;
+        ball.vy -= (1 + PARAMS.BOUNCE * 0.35) * dot * ny;
+      }
+    }
+
+    if (Math.hypot(ball.vx, ball.vy) < PARAMS.STOP_SPEED) {
+      ball.vx = 0; ball.vy = 0; ball.moving = false;
+      sinkBall();
+    }
+  }
+
   function sinkBall() {
-    ball.x = HOLE_POS.x; ball.y = HOLE_POS.y; won = true;
+    won = true;
     const diff = strokes - 5;
     const tags = { '-4':'Condor!!', '-3':'Albatross!', '-2':'Eagle!', '-1':'Birdie!', '0':'Par!', '1':'Bogey', '2':'Double Bogey' };
     msgEl.textContent = `Hole in ${strokes}  —  ${tags[diff] ?? `+${diff}`}`;
@@ -359,7 +396,7 @@
   }
 
   function reset() {
-    ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false };
+    ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
     strokes = 0; won = false; aiming = false;
     strokesEl.textContent = '0'; msgEl.textContent = '';
     level = cloneLevel();
@@ -394,15 +431,16 @@
 
   function drawHole() {
     const { x, y } = HOLE_POS;
-    ctx.beginPath(); ctx.arc(x+2, y+2, 12, 0, Math.PI*2);
+    const r = PARAMS.HOLE_RADIUS + PARAMS.BALL_R; // visual cup = physics cup wall + ball radius
+    ctx.beginPath(); ctx.arc(x+2, y+2, r, 0, Math.PI*2);
     ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI*2);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
     ctx.fillStyle = '#0E0905'; ctx.fill();
     ctx.strokeStyle = '#2A1F0A'; ctx.lineWidth = 1.5; ctx.stroke();
     ctx.strokeStyle = '#C8AA60'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(x+1, y-5); ctx.lineTo(x+1, y-28); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+1, y - r + 3); ctx.lineTo(x+1, y - r - 22); ctx.stroke();
     ctx.fillStyle = '#D03020';
-    ctx.beginPath(); ctx.moveTo(x+1,y-28); ctx.lineTo(x+16,y-21); ctx.lineTo(x+1,y-15); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x+1,y-r-22); ctx.lineTo(x+16,y-r-15); ctx.lineTo(x+1,y-r-8); ctx.closePath(); ctx.fill();
   }
 
   function drawTee() {
@@ -554,10 +592,9 @@
     hole: {
       label: '⛳ Hole',
       params: [
-        { key:'HOLE_RADIUS',         label:'Sink radius',    min:6,    max:35,    step:1,     digits:0 },
-        { key:'HOLE_ATTRACT_RADIUS', label:'Attract radius', min:15,   max:120,   step:2,     digits:0 },
-        { key:'HOLE_ATTRACT_FORCE',  label:'Attract force',  min:0,    max:0.6,   step:0.005, digits:3 },
-        { key:'HOLE_SINK_SPEED',     label:'Sink speed',     min:0.5,  max:15,    step:0.5,   digits:1 },
+        { key:'HOLE_RADIUS',         label:'Cup radius',     min:4,    max:30,    step:1,     digits:0 },
+        { key:'HOLE_ATTRACT_RADIUS', label:'Attract radius', min:10,   max:120,   step:1,     digits:0 },
+        { key:'HOLE_ATTRACT_FORCE',  label:'Attract force',  min:0,    max:1.0,   step:0.01,  digits:3 },
       ],
     },
     shot: {
