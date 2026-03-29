@@ -362,19 +362,34 @@
     }
   }
 
-  // ── Pathfinding (A*) ─────────────────────────────────────────────────────
+  // ── Pathfinding (A* + string-pull smoothing) ────────────────────────────
+
+  // Amanatides-Woo grid ray: returns true if no ROCK tile intersects the segment.
+  function hasLOS(x0, y0, x1, y1) {
+    const dx = x1 - x0, dy = y1 - y0;
+    let c = Math.floor(x0 / T), r = Math.floor(y0 / T);
+    const c1 = Math.floor(x1 / T), r1 = Math.floor(y1 / T);
+    const sc = Math.sign(dx), sr = Math.sign(dy);
+    const tdc = dx === 0 ? Infinity : Math.abs(T / dx);
+    const tdr = dy === 0 ? Infinity : Math.abs(T / dy);
+    let tmc = dx === 0 ? Infinity : Math.abs(((dx > 0 ? c + 1 : c) * T - x0) / dx);
+    let tmr = dy === 0 ? Infinity : Math.abs(((dy > 0 ? r + 1 : r) * T - y0) / dy);
+    for (;;) {
+      if (getTile(c, r) === ROCK) return false;
+      if (c === c1 && r === r1) return true;
+      if (tmc < tmr) { c += sc; tmc += tdc; } else { r += sr; tmr += tdr; }
+    }
+  }
 
   function aStar(x0, y0, x1, y1) {
     const c0 = Math.floor(x0 / T), r0 = Math.floor(y0 / T);
     const c1 = Math.floor(x1 / T), r1 = Math.floor(y1 / T);
     if (c0 === c1 && r0 === r1) return [];
     const key = (c, r) => r * COLS + c;
-    // Chebyshev heuristic matches diagonal-move cost
     const h   = (c, r) => Math.max(Math.abs(c - c1), Math.abs(r - r1));
     const open = new Map();
     const closed = new Set();
     open.set(key(c0, r0), { c: c0, r: r0, g: 0, f: h(c0, r0), par: null });
-    // 8-directional moves: cardinals cost 1, diagonals cost √2
     const DIRS = [[-1,0,1],[1,0,1],[0,-1,1],[0,1,1],[-1,-1,1.414],[-1,1,1.414],[1,-1,1.414],[1,1,1.414]];
     while (open.size) {
       let best = null;
@@ -382,14 +397,14 @@
       if (best.c === c1 && best.r === r1) {
         const path = [];
         for (let n = best; n; n = n.par) path.unshift({ x: n.c * T + T / 2, y: n.r * T + T / 2 });
-        return path.slice(1); // skip starting tile
+        path[path.length - 1] = { x: x1, y: y1 }; // exact goal position
+        return path.slice(1);
       }
       open.delete(key(best.c, best.r));
       closed.add(key(best.c, best.r));
       for (const [dc, dr, cost] of DIRS) {
         const nc = best.c + dc, nr = best.r + dr;
         if (getTile(nc, nr) === ROCK) continue;
-        // Prevent cutting through rock corners on diagonal moves
         if (dc !== 0 && dr !== 0 && (getTile(best.c + dc, best.r) === ROCK || getTile(best.c, best.r + dr) === ROCK)) continue;
         const k = key(nc, nr);
         if (closed.has(k)) continue;
@@ -398,11 +413,30 @@
         if (!ex || g < ex.g) open.set(k, { c: nc, r: nr, g, f: g + h(nc, nr), par: best });
       }
     }
-    return []; // no path (shouldn't happen on a connected level)
+    return [];
+  }
+
+  // String-pull: skip waypoints the wizard can see directly, reducing the
+  // tile-snapped path to the minimum set of turning points.
+  function smoothPath(path, px, py) {
+    if (path.length === 0) return [];
+    const out = [];
+    let i = 0;
+    while (i < path.length) {
+      let far = i;
+      for (let j = path.length - 1; j > i; j--) {
+        if (hasLOS(px, py, path[j].x, path[j].y)) { far = j; break; }
+      }
+      out.push(path[far]);
+      px = path[far].x; py = path[far].y;
+      i = far + 1;
+    }
+    return out;
   }
 
   function wizardStartWalk() {
-    const path = aStar(wizard.x, wizard.y, ball.x, ball.y);
+    const raw  = aStar(wizard.x, wizard.y, ball.x, ball.y);
+    const path = smoothPath(raw, wizard.x, wizard.y);
     wizard.path = path;
     wizard.walking = path.length > 0;
   }
