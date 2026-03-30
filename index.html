@@ -416,6 +416,8 @@
     WIZARD_CLEARANCE:    10,     // px — half-width clearance for path smoothing
     ZOMBIE_SPEED:        0.55,   // px per frame
     ZOMBIE_KNOCK:        2.2,    // ball-to-zombie knockback multiplier
+    EARLY_WALK:          false,  // wizard chases ball immediately when shot
+    CATCH_BALL:          false,  // wizard catches ball if it returns to them
   };
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -474,6 +476,10 @@
       apply: () => { PARAMS.ZOMBIE_KNOCK *= 1.3; } },
     { id: 'stun',       name: 'Stun Shot',    desc: 'Zombies stay stunned longer',
       apply: () => { /* coming soon */ } },
+    { id: 'earlywalk', name: 'Quick Feet',   desc: 'Wizard walks as soon as you shoot',
+      apply: () => { PARAMS.EARLY_WALK = true; } },
+    { id: 'catcher',   name: 'Ball Catcher', desc: 'Wizard catches ball if it returns to them',
+      apply: () => { PARAMS.CATCH_BALL = true; } },
   ];
 
   const ZOMBIE_START = { x: 4.5 * T, y: 8.5 * T };
@@ -490,7 +496,8 @@
   let dragTo   = { x: 0, y: 0 };
 
   // Wizard character
-  let wizard = { x: BALL_START.x, y: BALL_START.y, path: [], walking: false };
+  let wizard = { x: BALL_START.x, y: BALL_START.y, path: [], walking: false, repathTimer: 0 };
+  let ballAge = 0;  // frames since ball was last shot (for CATCH_BALL grace period)
 
   // Deterministic sand texture
   const sandDots = Array.from({ length: ROWS }, (_, r) =>
@@ -648,7 +655,16 @@
   }
 
   function updateWizard() {
-    if (!wizard.walking || gameLost) return;
+    if (gameLost) return;
+    // EARLY_WALK: repath toward moving ball every 30 frames
+    if (PARAMS.EARLY_WALK && ball.moving && !ball.inHole) {
+      wizard.repathTimer++;
+      if (!wizard.walking || wizard.repathTimer >= 30) {
+        wizard.repathTimer = 0;
+        wizardStartWalk();
+      }
+    }
+    if (!wizard.walking) return;
     const target = wizard.path[0];
     const dx = target.x - wizard.x, dy = target.y - wizard.y;
     const dist = Math.hypot(dx, dy);
@@ -790,6 +806,17 @@
   function update() {
     if (!ball.moving) return;
     if (ball.inHole) { updateInHole(); return; }
+
+    ballAge++;
+
+    // CATCH_BALL: wizard catches ball after a grace period of 15 frames
+    if (PARAMS.CATCH_BALL && ballAge > 15) {
+      if (Math.hypot(ball.x - wizard.x, ball.y - wizard.y) < PARAMS.BALL_R + 14) {
+        ball.vx = 0; ball.vy = 0; ball.moving = false;
+        wizard.walking = false;
+        return;
+      }
+    }
 
     // Hole attraction
     const hdx = HOLE_POS.x - ball.x, hdy = HOLE_POS.y - ball.y;
@@ -955,7 +982,8 @@
       if (aStar(BALL_START.x, BALL_START.y, HOLE_POS.x, HOLE_POS.y).length > 0) break;
     }
     ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
-    wizard.x = BALL_START.x; wizard.y = BALL_START.y; wizard.path = []; wizard.walking = false;
+    wizard.x = BALL_START.x; wizard.y = BALL_START.y; wizard.path = []; wizard.walking = false; wizard.repathTimer = 0;
+    ballAge = 0;
     zombies = [];
     for (let i = 0; i < round - 1; i++) addZombie(); // round 1 → 0 zombies
     bloodPools = [];
@@ -1218,7 +1246,7 @@
     if (len < 6) return;
     const speed = Math.min(len, PARAMS.MAX_DRAG) * PARAMS.POWER_SCALE;
     ball.vx = -(dx/len)*speed; ball.vy = -(dy/len)*speed;
-    ball.moving = true; strokes++; strokesEl.textContent = strokes;
+    ball.moving = true; ballAge = 0; strokes++; strokesEl.textContent = strokes;
   }
 
   document.addEventListener('keydown', e => { if (e.key==='r'||e.key==='R') reset(); });
@@ -1583,8 +1611,11 @@
     fullreset:     () => { round = 1; gameLost = false; reset(); },
     usebaselevel:  () => { level = cloneLevel(); },
     addzombieraw:  (x, y) => { zombies.push(makeZombie(x, y)); return zombies.length - 1; },
-    getwizard: () => ({ x: wizard.x, y: wizard.y }),
+    getwizard: () => ({ x: wizard.x, y: wizard.y, walking: wizard.walking }),
     getstate:  () => ({ won, gameLost }),
+    setparam:  (key, val) => { PARAMS[key] = val; },
+    getballage: () => ballAge,
+    shootball: (vx, vy) => { ball.vx = vx; ball.vy = vy; ball.moving = true; ballAge = 0; },
     ballOverlapsRock() {
       const r = PARAMS.BALL_R;
       for (let row = Math.floor((ball.y - r) / T); row <= Math.floor((ball.y + r) / T); row++) {

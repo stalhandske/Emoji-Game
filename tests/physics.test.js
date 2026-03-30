@@ -430,6 +430,54 @@ const TESTS = [
       if (result.vx2 <= 0) return `third zombie should have been pushed by cascade (vx=${result.vx2.toFixed(2)})`;
     },
   },
+
+  // ── Category 7: Power-ups ─────────────────────────────────────────────────
+
+  {
+    cat: 'Power-ups',
+    name: 'Quick Feet — wizard starts walking while ball is moving',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.setparam('EARLY_WALK', true);
+        // Place wizard at tee (ball start), shoot ball away
+        window.__golf.shootball(0, -8);
+      });
+      // After a few stepAlls the wizard should begin walking
+      const result = await page.evaluate(() => {
+        for (let i = 0; i < 35; i++) window.__golf.stepAll();
+        return { walking: window.__golf.getwizard().walking, ballMoving: window.__golf.getball().moving };
+      });
+      // Ball must still be moving and wizard should be walking
+      if (!result.ballMoving) return 'ball stopped too quickly — test inconclusive';
+      if (!result.walking) return 'wizard should be walking toward ball while EARLY_WALK is active';
+    },
+  },
+  {
+    cat: 'Power-ups',
+    name: 'Ball Catcher — ball stops when it reaches wizard',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.setparam('CATCH_BALL', true);
+        // Place wizard at a fixed spot, shoot ball toward them from 80px away
+        // Wizard stays at ball_start (~90,558). Shoot ball from same x, 80px above, downward.
+        window.__golf.setball({ x: 90, y: 478, vx: 0, vy: 3 });
+      });
+      const result = await page.evaluate(() => {
+        for (let i = 0; i < 200; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          if (!b.moving) return { stopped: true, frames: i };
+        }
+        const b = window.__golf.getball();
+        return { stopped: false, bx: b.x, by: b.y };
+      });
+      if (!result.stopped) return `ball should have been caught by wizard (ball at ${result.bx?.toFixed(1)},${result.by?.toFixed(1)})`;
+    },
+  },
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────
