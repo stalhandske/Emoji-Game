@@ -376,6 +376,7 @@
   const SPRITE_FLAG   = { palette: SPRITE_PAL, frames: ["000028800000028880000028800000020000000020000000020000000020000000020000000020000"] };
   const SPRITE_BALL   = { palette: SPRITE_PAL, frames: ["000111000001666100016666610166666661166666661166666661016666610001666100000111000"] };
   const SPRITE_WIZARD = { palette: SPRITE_PAL, frames: ["000010000000101000000101000000010000000111000001010100001010100000101000000101000"] };
+  const SPRITE_ZOMBIE = { palette: SPRITE_PAL, frames: ["000111000001f8f100001fff100000111000ff13331ff000131000000131000001303100001000100"] };
 
   // Draw a 9×9 sprite centred at (cx, cy). scale = game-px per sprite-px.
   // Frames may be a hex string ("0a1f…") or a Uint8Array/plain array.
@@ -444,7 +445,15 @@
 
   let ball    = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
   let strokes = 0;
-  let won     = false;
+  let won      = false;
+  let gameLost = false;
+
+  const ZOMBIE_START = { x: 4.5 * T, y: 8.5 * T };
+  const ZOMBIE_R     = 12;   // collision radius (px)
+  const ZOMBIE_SPEED = 0.55; // px per frame
+  const ZOMBIE_STUN  = 90;   // frames of stun after a hit
+  let zombie = { x: ZOMBIE_START.x, y: ZOMBIE_START.y, vx: 0, vy: 0,
+                 hp: 2, stunTimer: 0, dead: false, path: [], repathTimer: 999 };
   let aiming  = false;
   let dragFrom = { x: 0, y: 0 };
   let dragTo   = { x: 0, y: 0 };
@@ -470,47 +479,43 @@
 
   // ── Physics ───────────────────────────────────────────────────────────────
 
-  function resolveCollisions() {
-    const r = PARAMS.BALL_R;
-    for (let row = Math.floor((ball.y - r) / T); row <= Math.floor((ball.y + r) / T); row++) {
-      for (let col = Math.floor((ball.x - r) / T); col <= Math.floor((ball.x + r) / T); col++) {
+  // Generic circle-vs-AABB tile collision for any entity {x,y,vx,vy}.
+  function resolveEntityCollisions(ent, r, bounce) {
+    for (let row = Math.floor((ent.y - r) / T); row <= Math.floor((ent.y + r) / T); row++) {
+      for (let col = Math.floor((ent.x - r) / T); col <= Math.floor((ent.x + r) / T); col++) {
         if (getTile(col, row) !== ROCK) continue;
         const tx = col * T, ty = row * T;
-        const cx = Math.max(tx, Math.min(ball.x, tx + T));
-        const cy = Math.max(ty, Math.min(ball.y, ty + T));
-        const dx = ball.x - cx, dy = ball.y - cy;
+        const cx = Math.max(tx, Math.min(ent.x, tx + T));
+        const cy = Math.max(ty, Math.min(ent.y, ty + T));
+        const dx = ent.x - cx, dy = ent.y - cy;
         const dist2 = dx * dx + dy * dy;
         if (dist2 >= r * r || dist2 === 0) continue;
-
-        // Ghost-corner fix: if the closest point is a tile corner AND an
-        // adjacent tile in that corner's direction is also solid, this is an
-        // interior edge — skip it and let the neighbour's flat face handle it.
-        // Only applies when the ball is in the diagonal region (outside the tile
-        // in BOTH axes). If the ball is outside in only one axis, the corner is
-        // just the clamped end of a flat face — treat it as a normal face hit.
-        const onV = cx === tx || cx === tx + T;  // on a vertical edge
-        const onH = cy === ty || cy === ty + T;  // on a horizontal edge
+        const onV = cx === tx || cx === tx + T;
+        const onH = cy === ty || cy === ty + T;
         if (onV && onH) {
-          const outsideX = ball.x < tx || ball.x > tx + T;
-          const outsideY = ball.y < ty || ball.y > ty + T;
+          const outsideX = ent.x < tx || ent.x > tx + T;
+          const outsideY = ent.y < ty || ent.y > ty + T;
           if (outsideX && outsideY) {
             const adjCol = cx === tx + T ? col + 1 : col - 1;
             const adjRow = cy === ty + T ? row + 1 : row - 1;
             if (getTile(adjCol, row) === ROCK || getTile(col, adjRow) === ROCK) continue;
           }
         }
-
         const dist = Math.sqrt(dist2);
         const nx = dx / dist, ny = dy / dist;
-        ball.x += nx * (r - dist);
-        ball.y += ny * (r - dist);
-        const dot = ball.vx * nx + ball.vy * ny;
+        ent.x += nx * (r - dist);
+        ent.y += ny * (r - dist);
+        const dot = ent.vx * nx + ent.vy * ny;
         if (dot < 0) {
-          ball.vx -= (1 + PARAMS.BOUNCE) * dot * nx;
-          ball.vy -= (1 + PARAMS.BOUNCE) * dot * ny;
+          ent.vx -= (1 + bounce) * dot * nx;
+          ent.vy -= (1 + bounce) * dot * ny;
         }
       }
     }
+  }
+
+  function resolveCollisions() {
+    resolveEntityCollisions(ball, PARAMS.BALL_R, PARAMS.BOUNCE);
   }
 
   // ── Pathfinding (A* + string-pull smoothing) ────────────────────────────
@@ -620,6 +625,54 @@
     }
   }
 
+  function updateZombie() {
+    if (zombie.dead || won || gameLost) return;
+
+    // Knockback physics (sub-stepped to prevent tunnelling)
+    if (zombie.vx !== 0 || zombie.vy !== 0) {
+      const spd = Math.hypot(zombie.vx, zombie.vy);
+      const steps = Math.max(1, Math.ceil(spd / ZOMBIE_R));
+      for (let i = 0; i < steps; i++) {
+        zombie.x += zombie.vx / steps;
+        zombie.y += zombie.vy / steps;
+        resolveEntityCollisions(zombie, ZOMBIE_R, PARAMS.BOUNCE * 0.3);
+      }
+      zombie.vx *= 0.85; zombie.vy *= 0.85;
+      if (spd < 0.15) zombie.vx = zombie.vy = 0;
+    }
+
+    // Stun countdown
+    if (zombie.stunTimer > 0) { zombie.stunTimer--; return; }
+
+    // Repath toward wizard periodically
+    zombie.repathTimer++;
+    if (zombie.repathTimer >= 80 || zombie.path.length === 0) {
+      zombie.repathTimer = 0;
+      const raw = aStar(zombie.x, zombie.y, wizard.x, wizard.y);
+      zombie.path = smoothPath(raw, zombie.x, zombie.y);
+    }
+
+    // Walk along path
+    if (zombie.path.length > 0) {
+      const t = zombie.path[0];
+      const dx = t.x - zombie.x, dy = t.y - zombie.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= ZOMBIE_SPEED) {
+        zombie.x = t.x; zombie.y = t.y; zombie.path.shift();
+      } else {
+        zombie.x += (dx / dist) * ZOMBIE_SPEED;
+        zombie.y += (dy / dist) * ZOMBIE_SPEED;
+      }
+    }
+
+    // Catch wizard
+    if (Math.hypot(zombie.x - wizard.x, zombie.y - wizard.y) < ZOMBIE_R + 12) {
+      gameLost = true;
+      msgEl.textContent = 'DEVOURED!';
+      restartBtn.classList.add('visible');
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
 
   function update() {
@@ -657,6 +710,19 @@
     if (speed < PARAMS.STOP_SPEED) {
       ball.vx = 0; ball.vy = 0; ball.moving = false;
       wizardStartWalk();
+    }
+
+    // Ball hits zombie
+    if (!zombie.dead && zombie.stunTimer === 0) {
+      const zdx = ball.x - zombie.x, zdy = ball.y - zombie.y;
+      if (Math.hypot(zdx, zdy) < PARAMS.BALL_R + ZOMBIE_R) {
+        zombie.hp--;
+        zombie.stunTimer = ZOMBIE_STUN;
+        zombie.path = []; zombie.repathTimer = 999;
+        zombie.vx = ball.vx * 2.2; zombie.vy = ball.vy * 2.2;
+        ball.vx *= -0.25; ball.vy *= -0.25;
+        if (zombie.hp <= 0) zombie.dead = true;
+      }
     }
   }
 
@@ -707,7 +773,9 @@
   function reset() {
     ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
     wizard.x = BALL_START.x; wizard.y = BALL_START.y; wizard.path = []; wizard.walking = false;
-    strokes = 0; won = false; aiming = false;
+    Object.assign(zombie, { x: ZOMBIE_START.x, y: ZOMBIE_START.y, vx: 0, vy: 0,
+      hp: 2, stunTimer: 0, dead: false, path: [], repathTimer: 999 });
+    strokes = 0; won = false; gameLost = false; aiming = false;
     strokesEl.textContent = '0'; msgEl.textContent = '';
     level = cloneLevel();
     restartBtn.classList.remove('visible');
@@ -767,6 +835,19 @@
     ctx.beginPath(); ctx.arc(ball.x + 2, ball.y + 3, PARAMS.BALL_R, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fill();
     drawSprite(SPRITE_BALL, ball.x, ball.y, 2);
+  }
+
+  function drawZombie() {
+    if (zombie.dead) return;
+    ctx.save();
+    // Flash while stunned
+    if (zombie.stunTimer > 0) ctx.globalAlpha = Math.floor(zombie.stunTimer / 6) % 2 === 0 ? 0.25 : 1;
+    // Shadow
+    ctx.globalAlpha *= 1; // keep current alpha
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath(); ctx.arc(zombie.x + 2, zombie.y + 3, 10, 0, Math.PI * 2); ctx.fill();
+    drawSprite(SPRITE_ZOMBIE, zombie.x, zombie.y, 4);
+    ctx.restore();
   }
 
   function drawWizard() {
@@ -844,13 +925,14 @@
     drawTiles();
     drawHole();
     drawTee();
+    drawZombie();
     drawWizard();
     drawAim();
     drawBall();
     drawEditOverlay();
   }
 
-  function gameLoop() { update(); updateWizard(); draw(); requestAnimationFrame(gameLoop); }
+  function gameLoop() { update(); updateWizard(); updateZombie(); draw(); requestAnimationFrame(gameLoop); }
 
   // ── Input ─────────────────────────────────────────────────────────────────
 
@@ -865,23 +947,23 @@
   canvas.addEventListener('mousedown', e => {
     e.preventDefault();
     if (editMode) { openPanelForPos(canvasPos(e)); return; }
-    if (won || ball.moving || wizard.walking) return;
+    if (won || gameLost || ball.moving || wizard.walking) return;
     aiming = true; dragFrom = dragTo = canvasPos(e);
   });
   window.addEventListener('mousemove', e => { if (aiming) dragTo = canvasPos(e); });
-  window.addEventListener('mouseup', () => { if (aiming && !ball.moving && !won && !wizard.walking) { aiming = false; shoot(); } });
+  window.addEventListener('mouseup', () => { if (aiming && !ball.moving && !won && !gameLost && !wizard.walking) { aiming = false; shoot(); } });
 
   canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     if (editMode) { openPanelForPos(canvasPos(e.touches[0])); return; }
-    if (won || ball.moving || wizard.walking) return;
+    if (won || gameLost || ball.moving || wizard.walking) return;
     aiming = true; dragFrom = dragTo = canvasPos(e.touches[0]);
   }, { passive: false });
   canvas.addEventListener('touchmove', e => {
     e.preventDefault(); if (aiming) dragTo = canvasPos(e.touches[0]);
   }, { passive: false });
   canvas.addEventListener('touchend', e => {
-    e.preventDefault(); if (aiming && !ball.moving && !won && !wizard.walking) { aiming = false; shoot(); }
+    e.preventDefault(); if (aiming && !ball.moving && !won && !gameLost && !wizard.walking) { aiming = false; shoot(); }
   }, { passive: false });
 
   function shoot() {
@@ -1241,9 +1323,14 @@
   // Exposes internals for physics tests (harmless in production).
   window.__golf = {
     step: update,
+    stepAll: () => { update(); updateWizard(); updateZombie(); },
     getball: () => ({ x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, moving: ball.moving, inHole: ball.inHole }),
     setball: s => Object.assign(ball, { inHole: false, moving: true }, s),
     resetWon: () => { won = false; },
+    getzombie: () => ({ x: zombie.x, y: zombie.y, vx: zombie.vx, vy: zombie.vy, hp: zombie.hp, dead: zombie.dead, stunTimer: zombie.stunTimer }),
+    setzombie: s => Object.assign(zombie, s),
+    getwizard: () => ({ x: wizard.x, y: wizard.y }),
+    getstate:  () => ({ won, gameLost }),
     ballOverlapsRock() {
       const r = PARAMS.BALL_R;
       for (let row = Math.floor((ball.y - r) / T); row <= Math.floor((ball.y + r) / T); row++) {
