@@ -448,6 +448,7 @@
   let strokes = 0;
   let won      = false;
   let gameLost = false;
+  let round    = 1;  // persists across restarts; zombies = round count
 
   const ZOMBIE_START = { x: 4.5 * T, y: 8.5 * T };
   const ZOMBIE_R     = 12;   // collision radius (px)
@@ -814,7 +815,7 @@
   function sinkBall() {
     wizardStartWalk();
     won = true;
-    addZombie();
+    round++;
     const diff = strokes - 5;
     const tags = { '-4':'Condor!!', '-3':'Albatross!', '-2':'Eagle!', '-1':'Birdie!', '0':'Par!', '1':'Bogey', '2':'Double Bogey' };
     msgEl.textContent = `Hole in ${strokes}  —  ${tags[diff] ?? `+${diff}`}`;
@@ -825,6 +826,7 @@
     ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
     wizard.x = BALL_START.x; wizard.y = BALL_START.y; wizard.path = []; wizard.walking = false;
     zombies = [makeZombie(ZOMBIE_START.x, ZOMBIE_START.y)];
+    for (let i = 1; i < round; i++) addZombie();
     bloodPools = [];
     strokes = 0; won = false; gameLost = false; aiming = false;
     strokesEl.textContent = '0'; msgEl.textContent = '';
@@ -1393,6 +1395,8 @@
     getzombies:   () => zombies.map(z => ({ x: z.x, y: z.y, hp: z.hp, state: z.state, stunTimer: z.stunTimer })),
     getbloodpools: () => bloodPools.slice(),
     triggerWin:   () => sinkBall(),
+    getround:     () => round,
+    resetgame:    () => reset(),
     getwizard: () => ({ x: wizard.x, y: wizard.y }),
     getstate:  () => ({ won, gameLost }),
     ballOverlapsRock() {

@@ -330,12 +330,16 @@ const TESTS = [
   },
   {
     cat: 'Zombie',
-    name: 'Winning adds a new zombie to the level',
+    name: 'Winning increments round; restart spawns correct zombie count',
     async run(page) {
-      const before = await page.evaluate(() => window.__golf.getzombies().length);
+      const r0 = await page.evaluate(() => window.__golf.getround());
       await page.evaluate(() => window.__golf.triggerWin());
-      const after = await page.evaluate(() => window.__golf.getzombies().length);
-      if (after !== before + 1) return `expected ${before + 1} zombies after win, got ${after}`;
+      const r1 = await page.evaluate(() => window.__golf.getround());
+      if (r1 !== r0 + 1) return `round should be ${r0 + 1} after win (got ${r1})`;
+      // Restart — zombie count must equal new round
+      await page.evaluate(() => window.__golf.resetgame());
+      const count = await page.evaluate(() => window.__golf.getzombies().length);
+      if (count !== r1) return `expected ${r1} zombies after restart (got ${count})`;
     },
   },
   {
