@@ -267,7 +267,7 @@ const TESTS = [
     async run(page) {
       // Place zombie near ball's path, fire ball straight at it
       await page.evaluate(() => {
-        window.__golf.setzombie({ x: 200, y: 300, vx: 0, vy: 0, hp: 2, dead: false, stunTimer: 0, path: [], repathTimer: 999 });
+        window.__golf.setzombie({ x: 200, y: 300, vx: 0, vy: 0, hp: 2, state: 'alive', stunTimer: 0, path: [], repathTimer: 999 });
         window.__golf.setball({ x: 200, y: 200, vx: 0, vy: 8 });
       });
       const result = await page.evaluate(() => {
@@ -287,33 +287,45 @@ const TESTS = [
   },
   {
     cat: 'Zombie',
-    name: 'Ball hits zombie twice — zombie dies',
+    name: 'Ball hits zombie twice — zombie becomes corpse',
     async run(page) {
-      // First hit
+      // Place zombie at hp=1 (already hit once), fire ball at it for killing blow
       await page.evaluate(() => {
-        window.__golf.setzombie({ x: 200, y: 300, vx: 0, vy: 0, hp: 2, dead: false, stunTimer: 0, path: [], repathTimer: 999 });
-        window.__golf.setball({ x: 200, y: 200, vx: 0, vy: 8 });
-      });
-      // Wait for first hit
-      await page.evaluate(() => {
-        for (let i = 0; i < 120; i++) {
-          window.__golf.step();
-          if (window.__golf.getzombie().stunTimer > 0) break;
-        }
-      });
-      // Force zombie stun to expire and reset ball for second hit
-      await page.evaluate(() => {
-        window.__golf.setzombie({ x: 200, y: 300, vx: 0, vy: 0, hp: 1, dead: false, stunTimer: 0 });
+        window.__golf.setzombie({ x: 200, y: 300, vx: 0, vy: 0, hp: 1, state: 'alive', stunTimer: 0, path: [], repathTimer: 999 });
         window.__golf.setball({ x: 200, y: 200, vx: 0, vy: 8 });
       });
       const result = await page.evaluate(() => {
         for (let i = 0; i < 120; i++) {
           window.__golf.step();
-          if (window.__golf.getzombie().dead) return { dead: true };
+          const z = window.__golf.getzombie();
+          if (z.state === 'corpse') return { corpse: true };
         }
-        return { dead: false, hp: window.__golf.getzombie().hp };
+        return { corpse: false, state: window.__golf.getzombie().state };
       });
-      if (!result.dead) return `zombie should be dead after second hit (hp=${result.hp})`;
+      if (!result.corpse) return `zombie should be corpse after second hit (state=${result.state})`;
+    },
+  },
+  {
+    cat: 'Zombie',
+    name: 'Ball hits corpse — zombie gone, blood pool appears',
+    async run(page) {
+      // Set zombie directly as a corpse
+      await page.evaluate(() => {
+        window.__golf.setzombie({ x: 200, y: 300, vx: 0, vy: 0, hp: 0, state: 'corpse', stunTimer: 0, path: [], repathTimer: 999 });
+        window.__golf.setball({ x: 200, y: 200, vx: 0, vy: 8 });
+      });
+      const result = await page.evaluate(() => {
+        for (let i = 0; i < 120; i++) {
+          window.__golf.step();
+          const z = window.__golf.getzombie();
+          if (z.state === 'gone') {
+            return { gone: true, pools: window.__golf.getbloodpools().length };
+          }
+        }
+        return { gone: false, state: window.__golf.getzombie().state };
+      });
+      if (!result.gone)      return `zombie should be gone after hitting corpse (state=${result.state})`;
+      if (result.pools < 1)  return `blood pool should appear when corpse is destroyed (pools=${result.pools})`;
     },
   },
   {
@@ -324,7 +336,7 @@ const TESTS = [
       const wiz = await page.evaluate(() => window.__golf.getwizard());
       await page.evaluate((w) => {
         // Place zombie 30px away from wizard (just outside catch radius)
-        window.__golf.setzombie({ x: w.x + 30, y: w.y, vx: 0, vy: 0, hp: 1, dead: false, stunTimer: 0, path: [], repathTimer: 999 });
+        window.__golf.setzombie({ x: w.x + 30, y: w.y, vx: 0, vy: 0, hp: 1, state: 'alive', stunTimer: 0, path: [], repathTimer: 999 });
         // Ensure game is in a non-won, non-lost state
         window.__golf.resetWon();
       }, wiz);
