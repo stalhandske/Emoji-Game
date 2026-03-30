@@ -451,9 +451,10 @@
   let round    = 1;  // persists across restarts; zombies = round count
 
   const ZOMBIE_START = { x: 4.5 * T, y: 8.5 * T };
-  const ZOMBIE_R     = 12;   // collision radius (px)
-  const ZOMBIE_SPEED = 0.55; // px per frame
-  const ZOMBIE_STUN  = 90;   // frames of stun after a hit
+  const ZOMBIE_R          = 12;   // collision radius (px)
+  const ZOMBIE_SPEED      = 0.55; // px per frame
+  const ZOMBIE_STUN       = 90;   // frames of stun after a ball hit
+  const ZOMBIE_CHAIN_SPEED = 3;   // min relative speed (px/frame) for chain damage
   function makeZombie(x, y) {
     return { x, y, vx: 0, vy: 0, hp: 2, stunTimer: 0, state: 'alive', path: [], repathTimer: 999 };
   }
@@ -636,6 +637,68 @@
     }
   }
 
+  // Per-substep: resolve z against every other zombie (prevents tunneling, chains damage).
+  function resolveZombieVsOthers(z) {
+    for (const other of zombies) {
+      if (other === z || other.state === 'gone') continue;
+      const dx = other.x - z.x, dy = other.y - z.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= ZOMBIE_R * 2 || dist === 0) continue;
+      const nx = dx / dist, ny = dy / dist;
+      const overlap = ZOMBIE_R * 2 - dist;
+      z.x     -= nx * overlap / 2;  z.y     -= ny * overlap / 2;
+      other.x += nx * overlap / 2;  other.y += ny * overlap / 2;
+      const rs = (z.vx - other.vx) * nx + (z.vy - other.vy) * ny;
+      if (rs <= 0) continue;
+      z.vx     -= rs * nx;          z.vy     -= rs * ny;
+      other.vx += rs * nx * 0.85;   other.vy += rs * ny * 0.85;
+      if (rs > ZOMBIE_CHAIN_SPEED && other.stunTimer === 0) {
+        other.hp--;
+        other.stunTimer = Math.ceil(ZOMBIE_STUN / 3);
+        other.path = []; other.repathTimer = 999;
+        if (other.hp <= 0 && other.state === 'alive') other.state = 'corpse';
+        else if (other.state === 'corpse') { bloodPools.push({ x: other.x, y: other.y }); other.state = 'gone'; }
+      }
+    }
+  }
+
+  function resolveZombieZombieCollisions() {    for (let i = 0; i < zombies.length; i++) {
+      const a = zombies[i];
+      if (a.state === 'gone') continue;
+      for (let j = i + 1; j < zombies.length; j++) {
+        const b = zombies[j];
+        if (b.state === 'gone') continue;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const dist = Math.hypot(dx, dy);
+        const minDist = ZOMBIE_R * 2;
+        if (dist >= minDist || dist === 0) continue;
+        // Push apart
+        const nx = dx / dist, ny = dy / dist;
+        const overlap = minDist - dist;
+        a.x -= nx * overlap / 2;
+        a.y -= ny * overlap / 2;
+        b.x += nx * overlap / 2;
+        b.y += ny * overlap / 2;
+        // Relative velocity of a toward b
+        const relSpeed = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+        if (relSpeed <= 0) continue;
+        // Transfer momentum
+        a.vx -= relSpeed * nx;
+        a.vy -= relSpeed * ny;
+        b.vx += relSpeed * nx * 0.85;
+        b.vy += relSpeed * ny * 0.85;
+        // Chain damage if impact was hard enough
+        if (relSpeed > ZOMBIE_CHAIN_SPEED && b.stunTimer === 0) {
+          b.hp--;
+          b.stunTimer = Math.ceil(ZOMBIE_STUN / 3);
+          b.path = []; b.repathTimer = 999;
+          if (b.hp <= 0 && b.state === 'alive') b.state = 'corpse';
+          else if (b.state === 'corpse') { bloodPools.push({ x: b.x, y: b.y }); b.state = 'gone'; }
+        }
+      }
+    }
+  }
+
   function updateZombies() {
     if (won || gameLost) return;
     for (const z of zombies) {
@@ -649,6 +712,7 @@
           z.x += z.vx / steps;
           z.y += z.vy / steps;
           resolveEntityCollisions(z, ZOMBIE_R, PARAMS.BOUNCE * 0.3);
+          resolveZombieVsOthers(z);
         }
         z.vx *= 0.85; z.vy *= 0.85;
         if (spd < 0.15) z.vx = z.vy = 0;
@@ -688,6 +752,11 @@
         restartBtn.classList.add('visible');
         return;
       }
+    }
+    // Zombie-zombie collisions — 3 passes to allow chain cascades
+    for (let pass = 0; pass < 3; pass++) {
+      resolveZombieZombieCollisions();
+      if (gameLost) return;
     }
   }
 
@@ -1394,9 +1463,11 @@
     setzombie:    s  => Object.assign(zombies[0], s),
     getzombies:   () => zombies.map(z => ({ x: z.x, y: z.y, hp: z.hp, state: z.state, stunTimer: z.stunTimer })),
     getbloodpools: () => bloodPools.slice(),
-    triggerWin:   () => sinkBall(),
-    getround:     () => round,
-    resetgame:    () => reset(),
+    triggerWin:    () => sinkBall(),
+    getround:      () => round,
+    resetgame:     () => reset(),
+    fullreset:     () => { round = 1; reset(); },
+    addzombieraw:  (x, y) => zombies.push(makeZombie(x, y)),
     getwizard: () => ({ x: wizard.x, y: wizard.y }),
     getstate:  () => ({ won, gameLost }),
     ballOverlapsRock() {

@@ -365,6 +365,63 @@ const TESTS = [
       if (!result.gameLost) return `gameLost should be true when zombie catches wizard`;
     },
   },
+
+  // ── Category 6: Zombie chain collisions ───────────────────────────────────
+
+  {
+    cat: 'Zombie chain',
+    name: 'Fast zombie overlapping second — second gets pushed',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        // zombie[0]: moving fast right, already overlapping zombie[1]
+        window.__golf.setzombie({ x: 100, y: 300, vx: 15, vy: 0, hp: 2, state: 'alive', stunTimer: 5, path: [], repathTimer: 999 });
+        window.__golf.addzombieraw(118, 300); // dist=18 < 24 → already overlapping
+      });
+      const result = await page.evaluate(() => {
+        window.__golf.stepAll();
+        const z1 = window.__golf.getzombies()[1];
+        return { vx: z1.vx };
+      });
+      if (result.vx <= 0) return `second zombie should be pushed right (vx=${result.vx.toFixed(2)})`;
+    },
+  },
+  {
+    cat: 'Zombie chain',
+    name: 'High-speed chain impact damages second zombie',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.setzombie({ x: 100, y: 300, vx: 20, vy: 0, hp: 2, state: 'alive', stunTimer: 5, path: [], repathTimer: 999 });
+        window.__golf.addzombieraw(118, 300);
+      });
+      const result = await page.evaluate(() => {
+        window.__golf.stepAll();
+        const z1 = window.__golf.getzombies()[1];
+        return { hp: z1.hp, state: z1.state };
+      });
+      if (result.hp >= 2) return `second zombie should take chain damage (hp=${result.hp}, state=${result.state})`;
+    },
+  },
+  {
+    cat: 'Zombie chain',
+    name: 'Chain cascade: three zombies in a line',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        // zombie[0] fast → hits zombie[1] → zombie[1] should hit zombie[2]
+        window.__golf.setzombie({ x: 80, y: 300, vx: 25, vy: 0, hp: 2, state: 'alive', stunTimer: 5, path: [], repathTimer: 999 });
+        window.__golf.addzombieraw(102, 300); // overlaps z0
+        window.__golf.addzombieraw(124, 300); // overlaps z1 after z1 is pushed
+      });
+      const result = await page.evaluate(() => {
+        for (let i = 0; i < 5; i++) window.__golf.stepAll();
+        const zs = window.__golf.getzombies();
+        return { hp1: zs[1].hp, hp2: zs[2].hp, vx2: zs[2].vx };
+      });
+      if (result.vx2 <= 0) return `third zombie should have been pushed by cascade (vx=${result.vx2.toFixed(2)})`;
+    },
+  },
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────
