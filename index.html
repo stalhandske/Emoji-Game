@@ -648,7 +648,7 @@
   }
 
   function updateWizard() {
-    if (!wizard.walking) return;
+    if (!wizard.walking || gameLost) return;
     const target = wizard.path[0];
     const dx = target.x - wizard.x, dy = target.y - wizard.y;
     const dist = Math.hypot(dx, dy);
