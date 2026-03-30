@@ -107,6 +107,7 @@ const TESTS = [
     cat: 'Tunneling',
     name: 'Interior rock (row-4 cluster) — vertical, vy=-20',
     async run(page) {
+      await page.evaluate(() => window.__golf.usebaselevel());
       // Row-4 rock bottom face y=180; ball centre bounces at y=188
       const b = await run(page, { x: 216, y: 220, vx: 0, vy: -20 }, 10);
       if (b.inRock) return `ball ended inside rock`;
@@ -117,6 +118,7 @@ const TESTS = [
     cat: 'Tunneling',
     name: 'Interior rock (row-6 cluster) — diagonal, speed≈22',
     async run(page) {
+      await page.evaluate(() => window.__golf.usebaselevel());
       // Approach from bottom-right, heading toward top-left corner of cluster
       const b = await run(page, { x: 200, y: 280, vx: -16, vy: -16 }, 12);
       if (b.inRock) return `ball ended inside rock`;
@@ -133,6 +135,7 @@ const TESTS = [
     // The join is the shared edge between col-5 and col-6 at x=216.
     // Ball fired straight up at the middle of that join, vx=0.
     async run(page) {
+      await page.evaluate(() => window.__golf.usebaselevel());
       const b = await runUntil(
         page,
         { x: 216, y: 210, vx: 0, vy: -12 },
@@ -146,6 +149,7 @@ const TESTS = [
     cat: 'Ghost corners',
     name: 'Horizontal join inside row-6 rock cluster — no lateral kick',
     async run(page) {
+      await page.evaluate(() => window.__golf.usebaselevel());
       const b = await runUntil(
         page,
         { x: 144, y: 275, vx: 0, vy: -12 },
@@ -176,6 +180,7 @@ const TESTS = [
     // The top-left corner of the row-4 col-5 rock at (180, 144) IS a real exterior
     // corner — no adjacent solid tiles diagonally outward. Ball should bounce.
     async run(page) {
+      await page.evaluate(() => window.__golf.usebaselevel());
       const b = await runUntil(
         page,
         { x: 160, y: 124, vx: 8, vy: 8 },
@@ -330,16 +335,16 @@ const TESTS = [
   },
   {
     cat: 'Zombie',
-    name: 'Winning increments round; restart spawns correct zombie count',
+    name: 'Winning increments round; restart spawns round-1 zombies',
     async run(page) {
-      const r0 = await page.evaluate(() => window.__golf.getround());
+      await page.evaluate(() => window.__golf.fullreset()); // clean: round=1, 0 zombies
+      const r0 = await page.evaluate(() => window.__golf.getround()); // 1
       await page.evaluate(() => window.__golf.triggerWin());
-      const r1 = await page.evaluate(() => window.__golf.getround());
+      const r1 = await page.evaluate(() => window.__golf.getround()); // 2
       if (r1 !== r0 + 1) return `round should be ${r0 + 1} after win (got ${r1})`;
-      // Restart — zombie count must equal new round
       await page.evaluate(() => window.__golf.resetgame());
       const count = await page.evaluate(() => window.__golf.getzombies().length);
-      if (count !== r1) return `expected ${r1} zombies after restart (got ${count})`;
+      if (count !== r1 - 1) return `expected ${r1 - 1} zombies for round ${r1} (got ${count})`;
     },
   },
   {
@@ -374,6 +379,7 @@ const TESTS = [
     async run(page) {
       await page.evaluate(() => {
         window.__golf.fullreset();
+        window.__golf.usebaselevel();
         // zombie[0]: moving fast right, already overlapping zombie[1]
         window.__golf.setzombie({ x: 100, y: 300, vx: 15, vy: 0, hp: 2, state: 'alive', stunTimer: 5, path: [], repathTimer: 999 });
         window.__golf.addzombieraw(118, 300); // dist=18 < 24 → already overlapping
@@ -392,6 +398,7 @@ const TESTS = [
     async run(page) {
       await page.evaluate(() => {
         window.__golf.fullreset();
+        window.__golf.usebaselevel();
         window.__golf.setzombie({ x: 100, y: 300, vx: 20, vy: 0, hp: 2, state: 'alive', stunTimer: 5, path: [], repathTimer: 999 });
         window.__golf.addzombieraw(118, 300);
       });
@@ -409,6 +416,7 @@ const TESTS = [
     async run(page) {
       await page.evaluate(() => {
         window.__golf.fullreset();
+        window.__golf.usebaselevel();
         // zombie[0] fast → hits zombie[1] → zombie[1] should hit zombie[2]
         window.__golf.setzombie({ x: 80, y: 300, vx: 25, vy: 0, hp: 2, state: 'alive', stunTimer: 5, path: [], repathTimer: 999 });
         window.__golf.addzombieraw(102, 300); // overlaps z0

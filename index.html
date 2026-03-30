@@ -376,6 +376,7 @@
   const SPRITE_FLAG   = { palette: SPRITE_PAL, frames: ["000028800000028880000028800000020000000020000000020000000020000000020000000020000"] };
   const SPRITE_BALL   = { palette: SPRITE_PAL, frames: ["000111000001666100016666610166666661166666661166666661016666610001666100000111000"] };
   const SPRITE_WIZARD = { palette: SPRITE_PAL, frames: ["000010000000101000000101000000010000000111000001010100001010100000101000000101000"] };
+  const SPRITE_WIZARD_DEAD = { palette: SPRITE_PAL, frames: ["000000000000001000000011100001011100011111100001181100001111100000010000000000000"] };
   const SPRITE_ZOMBIE  = { palette: SPRITE_PAL, frames: ["000111000001f8f100001fff100000111000ff13331ff000131000000131000001303100001000100"] };
   const SPRITE_CORPSE  = { palette: SPRITE_PAL, frames: ["000000000000001000000011100001113310011333f10011111100001f8f100001111100000000000"] };
 
@@ -413,6 +414,8 @@
     HOLE_FRICTION:       0.96,   // friction inside the cup (replaces FRICTION)
     WIZARD_SPEED:        2.2,    // px per frame
     WIZARD_CLEARANCE:    10,     // px — half-width clearance for path smoothing
+    ZOMBIE_SPEED:        0.55,   // px per frame
+    ZOMBIE_KNOCK:        2.2,    // ball-to-zombie knockback multiplier
   };
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -448,17 +451,39 @@
   let strokes = 0;
   let won      = false;
   let gameLost = false;
-  let round    = 1;  // persists across restarts; zombies = round count
+  let round    = 1;  // persists across restarts; zombies per round = round - 1
+  let choosingPowerUp = false;
+  let powerUpChoices  = [];
+
+  // Power-ups offered between rounds (2 random picks from this list).
+  // apply() is called when the player chooses it; effects accumulate across rounds.
+  const POWER_UPS = [
+    { id: 'bighole',    name: 'Big Cup',      desc: 'Larger hole & stronger pull',
+      apply: () => { PARAMS.HOLE_RADIUS += 4; PARAMS.HOLE_ATTRACT_RADIUS += 8; PARAMS.HOLE_ATTRACT_FORCE += 0.3; } },
+    { id: 'bounce',     name: 'Lively Ball',  desc: 'More bounce off walls',
+      apply: () => { PARAMS.BOUNCE = Math.min(0.97, PARAMS.BOUNCE + 0.08); } },
+    { id: 'power',      name: 'Power Shot',   desc: 'Ball launches faster',
+      apply: () => { PARAMS.POWER_SCALE *= 1.2; PARAMS.MAX_DRAG += 10; } },
+    { id: 'slowzombie', name: 'Slow Horde',   desc: 'Zombies shuffle slower',
+      apply: () => { PARAMS.ZOMBIE_SPEED = Math.max(0.15, PARAMS.ZOMBIE_SPEED * 0.75); } },
+    { id: 'lowfriction',name: 'Slick Sand',   desc: 'Ball rolls much further',
+      apply: () => { PARAMS.FRICTION = Math.min(0.99, PARAMS.FRICTION + 0.008); } },
+    { id: 'magnet',     name: 'Magnetic Cup', desc: 'Hole pulls from further away',
+      apply: () => { PARAMS.HOLE_ATTRACT_RADIUS += 12; PARAMS.HOLE_ATTRACT_FORCE += 0.5; } },
+    { id: 'heavyball',  name: 'Heavy Ball',   desc: 'Zombies fly further when hit',
+      apply: () => { PARAMS.ZOMBIE_KNOCK *= 1.3; } },
+    { id: 'stun',       name: 'Stun Shot',    desc: 'Zombies stay stunned longer',
+      apply: () => { /* coming soon */ } },
+  ];
 
   const ZOMBIE_START = { x: 4.5 * T, y: 8.5 * T };
   const ZOMBIE_R          = 12;   // collision radius (px)
-  const ZOMBIE_SPEED      = 0.55; // px per frame
   const ZOMBIE_STUN       = 90;   // frames of stun after a ball hit
   const ZOMBIE_CHAIN_SPEED = 3;   // min relative speed (px/frame) for chain damage
   function makeZombie(x, y) {
     return { x, y, vx: 0, vy: 0, hp: 2, stunTimer: 0, state: 'alive', path: [], repathTimer: 999 };
   }
-  let zombies = [makeZombie(ZOMBIE_START.x, ZOMBIE_START.y)];
+  let zombies    = [];  // populated by reset()
   let bloodPools = [];
   let aiming  = false;
   let dragFrom = { x: 0, y: 0 };
@@ -737,11 +762,11 @@
         const t = z.path[0];
         const dx = t.x - z.x, dy = t.y - z.y;
         const dist = Math.hypot(dx, dy);
-        if (dist <= ZOMBIE_SPEED) {
+        if (dist <= PARAMS.ZOMBIE_SPEED) {
           z.x = t.x; z.y = t.y; z.path.shift();
         } else {
-          z.x += (dx / dist) * ZOMBIE_SPEED;
-          z.y += (dy / dist) * ZOMBIE_SPEED;
+          z.x += (dx / dist) * PARAMS.ZOMBIE_SPEED;
+          z.y += (dy / dist) * PARAMS.ZOMBIE_SPEED;
         }
       }
 
@@ -810,7 +835,7 @@
         z.hp--;
         z.stunTimer = ZOMBIE_STUN;
         z.path = []; z.repathTimer = 999;
-        z.vx = ball.vx * 2.2; z.vy = ball.vy * 2.2;
+        z.vx = ball.vx * PARAMS.ZOMBIE_KNOCK; z.vy = ball.vy * PARAMS.ZOMBIE_KNOCK;
         ball.vx *= -0.25; ball.vy *= -0.25;
         if (z.hp <= 0) z.state = 'corpse';
       } else if (z.state === 'corpse') {
@@ -864,6 +889,34 @@
     }
   }
 
+  function generateLevel() {
+    const teeC = Math.floor(BALL_START.x / T), teeR = Math.floor(BALL_START.y / T);
+    const holC = Math.floor(HOLE_POS.x  / T), holR = Math.floor(HOLE_POS.y  / T);
+    function safe(c, r) {
+      return (Math.abs(c - teeC) <= 1 && Math.abs(r - teeR) <= 1) ||
+             (Math.abs(c - holC) <= 1 && Math.abs(r - holR) <= 1);
+    }
+    const grid = Array.from({ length: ROWS }, (_, r) =>
+      Array.from({ length: COLS }, (_, c) =>
+        r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1 ? ROCK : SAND
+      )
+    );
+    const target = 3 + Math.floor(Math.random() * 4); // 3-6 pairs
+    let placed = 0;
+    for (let tries = 0; tries < 400 && placed < target; tries++) {
+      const r = 1 + Math.floor(Math.random() * (ROWS - 2));
+      const c = 1 + Math.floor(Math.random() * (COLS - 2));
+      const horiz = Math.random() < 0.5;
+      const r2 = horiz ? r : r + 1, c2 = horiz ? c + 1 : c;
+      if (r2 >= ROWS - 1 || c2 >= COLS - 1) continue;
+      if (safe(c, r) || safe(c2, r2)) continue;
+      if (grid[r][c] !== SAND || grid[r2][c2] !== SAND) continue;
+      grid[r][c] = ROCK; grid[r2][c2] = ROCK;
+      placed++;
+    }
+    return grid;
+  }
+
   function addZombie() {
     const candidates = [];
     for (let r = 1; r < ROWS - 1; r++) {
@@ -888,18 +941,26 @@
     const diff = strokes - 5;
     const tags = { '-4':'Condor!!', '-3':'Albatross!', '-2':'Eagle!', '-1':'Birdie!', '0':'Par!', '1':'Bogey', '2':'Double Bogey' };
     msgEl.textContent = `Hole in ${strokes}  —  ${tags[diff] ?? `+${diff}`}`;
-    restartBtn.classList.add('visible');
+    // Show power-up selection; restart button appears only after a choice is made
+    const shuffled = POWER_UPS.slice().sort(() => Math.random() - 0.5);
+    powerUpChoices  = shuffled.slice(0, 2);
+    choosingPowerUp = true;
   }
 
   function reset() {
+    if (gameLost) round = 1; // death resets progression
+    // Generate level first — addZombie needs getTile to work on the new layout
+    for (let attempt = 0; attempt < 20; attempt++) {
+      level = generateLevel();
+      if (aStar(BALL_START.x, BALL_START.y, HOLE_POS.x, HOLE_POS.y).length > 0) break;
+    }
     ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
     wizard.x = BALL_START.x; wizard.y = BALL_START.y; wizard.path = []; wizard.walking = false;
-    zombies = [makeZombie(ZOMBIE_START.x, ZOMBIE_START.y)];
-    for (let i = 1; i < round; i++) addZombie();
+    zombies = [];
+    for (let i = 0; i < round - 1; i++) addZombie(); // round 1 → 0 zombies
     bloodPools = [];
-    strokes = 0; won = false; gameLost = false; aiming = false;
+    strokes = 0; won = false; gameLost = false; aiming = false; choosingPowerUp = false;
     strokesEl.textContent = '0'; msgEl.textContent = '';
-    level = cloneLevel();
     restartBtn.classList.remove('visible');
   }
 
@@ -982,10 +1043,9 @@
   }
 
   function drawWizard() {
-    // Shadow
     ctx.beginPath(); ctx.arc(wizard.x + 2, wizard.y + 3, 9, 0, Math.PI * 2);
     ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fill();
-    drawSprite(SPRITE_WIZARD, wizard.x, wizard.y, 4);
+    drawSprite(gameLost ? SPRITE_WIZARD_DEAD : SPRITE_WIZARD, wizard.x, wizard.y, 4);
   }
 
   function drawAim() {
@@ -1051,6 +1111,42 @@
     ctx.restore();
   }
 
+  function drawPowerUpScreen() {
+    if (!choosingPowerUp) return;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#F0C040';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('CHOOSE A POWER-UP', canvas.width / 2, 108);
+    ctx.fillStyle = 'rgba(240,200,100,0.6)';
+    ctx.font = '11px sans-serif';
+    ctx.fillText(`Round ${round} — ${round - 1} zombie${round - 1 === 1 ? '' : 's'} incoming`, canvas.width / 2, 128);
+    const CW = 148, CH = 96, gap = 12;
+    const x0 = canvas.width / 2 - CW - gap / 2, y0 = 144;
+    for (let i = 0; i < 2; i++) {
+      const pu = powerUpChoices[i];
+      const bx = i === 0 ? x0 : x0 + CW + gap;
+      ctx.fillStyle = 'rgba(70,52,18,0.92)';
+      ctx.strokeStyle = '#C8A440'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.roundRect(bx, y0, CW, CH, 8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 13px sans-serif';
+      ctx.fillText(pu.name, bx + CW / 2, y0 + 26);
+      ctx.fillStyle = 'rgba(240,220,160,0.9)'; ctx.font = '10px sans-serif';
+      // Simple word-wrap at ~22 chars
+      const words = pu.desc.split(' ');
+      let line = '', lines = [], lx = bx + CW / 2, ly = y0 + 52;
+      for (const w of words) {
+        const test = line ? line + ' ' + w : w;
+        if (test.length > 22 && line) { lines.push(line); line = w; } else line = test;
+      }
+      lines.push(line);
+      lines.forEach((l, n) => ctx.fillText(l, lx, ly + n * 14));
+    }
+    ctx.restore();
+  }
+
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     drawTiles();
@@ -1061,6 +1157,7 @@
     drawWizard();
     drawAim();
     drawBall();
+    drawPowerUpScreen();
     drawEditOverlay();
   }
 
@@ -1076,9 +1173,25 @@
     };
   }
 
+  function pickPowerUp(pos) {
+    if (!choosingPowerUp) return false;
+    const CW = 148, CH = 96, gap = 12;
+    const x0 = canvas.width / 2 - CW - gap / 2, y0 = 144;
+    for (let i = 0; i < 2; i++) {
+      const bx = i === 0 ? x0 : x0 + CW + gap;
+      if (pos.x >= bx && pos.x <= bx + CW && pos.y >= y0 && pos.y <= y0 + CH) {
+        powerUpChoices[i].apply();
+        reset();
+        return true;
+      }
+    }
+    return true; // swallow all clicks while overlay is open
+  }
+
   canvas.addEventListener('mousedown', e => {
     e.preventDefault();
     if (editMode) { openPanelForPos(canvasPos(e)); return; }
+    if (pickPowerUp(canvasPos(e))) return;
     if (won || gameLost || ball.moving || wizard.walking) return;
     aiming = true; dragFrom = dragTo = canvasPos(e);
   });
@@ -1088,6 +1201,7 @@
   canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     if (editMode) { openPanelForPos(canvasPos(e.touches[0])); return; }
+    if (pickPowerUp(canvasPos(e.touches[0]))) return;
     if (won || gameLost || ball.moving || wizard.walking) return;
     aiming = true; dragFrom = dragTo = canvasPos(e.touches[0]);
   }, { passive: false });
@@ -1459,15 +1573,16 @@
     getball: () => ({ x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, moving: ball.moving, inHole: ball.inHole }),
     setball: s => Object.assign(ball, { inHole: false, moving: true }, s),
     resetWon: () => { won = false; },
-    getzombie:    () => { const z = zombies[0]; return { x: z.x, y: z.y, vx: z.vx, vy: z.vy, hp: z.hp, state: z.state, dead: z.state === 'gone', stunTimer: z.stunTimer }; },
-    setzombie:    s  => Object.assign(zombies[0], s),
+    getzombie:    () => { const z = zombies[0] ?? makeZombie(0,0); return { x: z.x, y: z.y, vx: z.vx, vy: z.vy, hp: z.hp, state: z.state, dead: z.state === 'gone', stunTimer: z.stunTimer }; },
+    setzombie:    s  => { if (!zombies.length) zombies.push(makeZombie(s.x??200, s.y??300)); Object.assign(zombies[0], s); },
     getzombies:   () => zombies.map(z => ({ x: z.x, y: z.y, hp: z.hp, state: z.state, stunTimer: z.stunTimer })),
     getbloodpools: () => bloodPools.slice(),
     triggerWin:    () => sinkBall(),
     getround:      () => round,
     resetgame:     () => reset(),
-    fullreset:     () => { round = 1; reset(); },
-    addzombieraw:  (x, y) => zombies.push(makeZombie(x, y)),
+    fullreset:     () => { round = 1; gameLost = false; reset(); },
+    usebaselevel:  () => { level = cloneLevel(); },
+    addzombieraw:  (x, y) => { zombies.push(makeZombie(x, y)); return zombies.length - 1; },
     getwizard: () => ({ x: wizard.x, y: wizard.y }),
     getstate:  () => ({ won, gameLost }),
     ballOverlapsRock() {
@@ -1487,6 +1602,7 @@
   };
   // ─────────────────────────────────────────────────────────────────────────
 
+  reset();   // initialise level, ball, wizard, zombies for round 1
   gameLoop();
   </script>
 </body>
