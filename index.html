@@ -453,8 +453,10 @@
   const ZOMBIE_R     = 12;   // collision radius (px)
   const ZOMBIE_SPEED = 0.55; // px per frame
   const ZOMBIE_STUN  = 90;   // frames of stun after a hit
-  let zombie = { x: ZOMBIE_START.x, y: ZOMBIE_START.y, vx: 0, vy: 0,
-                 hp: 2, stunTimer: 0, state: 'alive', path: [], repathTimer: 999 };
+  function makeZombie(x, y) {
+    return { x, y, vx: 0, vy: 0, hp: 2, stunTimer: 0, state: 'alive', path: [], repathTimer: 999 };
+  }
+  let zombies = [makeZombie(ZOMBIE_START.x, ZOMBIE_START.y)];
   let bloodPools = [];
   let aiming  = false;
   let dragFrom = { x: 0, y: 0 };
@@ -552,10 +554,10 @@
            castRay(x0 - px, y0 - py, x1 - px, y1 - py);
   }
 
-  // Returns true when the corpse occupies this grid cell (blocks wizard pathfinding).
+  // Returns true if any corpse zombie occupies this grid cell (blocks wizard pathfinding).
   function isSoftBlock(col, row) {
-    if (zombie.state !== 'corpse') return false;
-    return Math.floor(zombie.x / T) === col && Math.floor(zombie.y / T) === row;
+    return zombies.some(z => z.state === 'corpse' &&
+      Math.floor(z.x / T) === col && Math.floor(z.y / T) === row);
   }
 
   function aStar(x0, y0, x1, y1) {
@@ -633,54 +635,58 @@
     }
   }
 
-  function updateZombie() {
-    if (zombie.state === 'gone' || won || gameLost) return;
+  function updateZombies() {
+    if (won || gameLost) return;
+    for (const z of zombies) {
+      if (z.state === 'gone') continue;
 
-    // Knockback physics (sub-stepped to prevent tunnelling) — runs for both alive and corpse
-    if (zombie.vx !== 0 || zombie.vy !== 0) {
-      const spd = Math.hypot(zombie.vx, zombie.vy);
-      const steps = Math.max(1, Math.ceil(spd / ZOMBIE_R));
-      for (let i = 0; i < steps; i++) {
-        zombie.x += zombie.vx / steps;
-        zombie.y += zombie.vy / steps;
-        resolveEntityCollisions(zombie, ZOMBIE_R, PARAMS.BOUNCE * 0.3);
+      // Knockback physics (sub-stepped to prevent tunnelling) — runs for both alive and corpse
+      if (z.vx !== 0 || z.vy !== 0) {
+        const spd = Math.hypot(z.vx, z.vy);
+        const steps = Math.max(1, Math.ceil(spd / ZOMBIE_R));
+        for (let i = 0; i < steps; i++) {
+          z.x += z.vx / steps;
+          z.y += z.vy / steps;
+          resolveEntityCollisions(z, ZOMBIE_R, PARAMS.BOUNCE * 0.3);
+        }
+        z.vx *= 0.85; z.vy *= 0.85;
+        if (spd < 0.15) z.vx = z.vy = 0;
       }
-      zombie.vx *= 0.85; zombie.vy *= 0.85;
-      if (spd < 0.15) zombie.vx = zombie.vy = 0;
-    }
 
-    // Stun countdown
-    if (zombie.stunTimer > 0) { zombie.stunTimer--; return; }
+      // Stun countdown
+      if (z.stunTimer > 0) { z.stunTimer--; continue; }
 
-    // Corpse just lies there — no pathfinding, no catching
-    if (zombie.state === 'corpse') return;
+      // Corpse just lies there — no pathfinding, no catching
+      if (z.state === 'corpse') continue;
 
-    // Repath toward wizard periodically
-    zombie.repathTimer++;
-    if (zombie.repathTimer >= 80 || zombie.path.length === 0) {
-      zombie.repathTimer = 0;
-      const raw = aStar(zombie.x, zombie.y, wizard.x, wizard.y);
-      zombie.path = smoothPath(raw, zombie.x, zombie.y);
-    }
-
-    // Walk along path
-    if (zombie.path.length > 0) {
-      const t = zombie.path[0];
-      const dx = t.x - zombie.x, dy = t.y - zombie.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist <= ZOMBIE_SPEED) {
-        zombie.x = t.x; zombie.y = t.y; zombie.path.shift();
-      } else {
-        zombie.x += (dx / dist) * ZOMBIE_SPEED;
-        zombie.y += (dy / dist) * ZOMBIE_SPEED;
+      // Repath toward wizard periodically
+      z.repathTimer++;
+      if (z.repathTimer >= 80 || z.path.length === 0) {
+        z.repathTimer = 0;
+        const raw = aStar(z.x, z.y, wizard.x, wizard.y);
+        z.path = smoothPath(raw, z.x, z.y);
       }
-    }
 
-    // Catch wizard
-    if (Math.hypot(zombie.x - wizard.x, zombie.y - wizard.y) < ZOMBIE_R + 12) {
-      gameLost = true;
-      msgEl.textContent = 'DEVOURED!';
-      restartBtn.classList.add('visible');
+      // Walk along path
+      if (z.path.length > 0) {
+        const t = z.path[0];
+        const dx = t.x - z.x, dy = t.y - z.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist <= ZOMBIE_SPEED) {
+          z.x = t.x; z.y = t.y; z.path.shift();
+        } else {
+          z.x += (dx / dist) * ZOMBIE_SPEED;
+          z.y += (dy / dist) * ZOMBIE_SPEED;
+        }
+      }
+
+      // Catch wizard
+      if (Math.hypot(z.x - wizard.x, z.y - wizard.y) < ZOMBIE_R + 12) {
+        gameLost = true;
+        msgEl.textContent = 'DEVOURED!';
+        restartBtn.classList.add('visible');
+        return;
+      }
     }
   }
 
@@ -723,25 +729,32 @@
       wizardStartWalk();
     }
 
-    // Ball hits alive zombie
-    if (zombie.state === 'alive' && zombie.stunTimer === 0) {
-      const zdx = ball.x - zombie.x, zdy = ball.y - zombie.y;
-      if (Math.hypot(zdx, zdy) < PARAMS.BALL_R + ZOMBIE_R) {
-        zombie.hp--;
-        zombie.stunTimer = ZOMBIE_STUN;
-        zombie.path = []; zombie.repathTimer = 999;
-        zombie.vx = ball.vx * 2.2; zombie.vy = ball.vy * 2.2;
+    // Ball hits zombies
+    for (const z of zombies) {
+      if (z.stunTimer > 0) continue;
+      const zdx = ball.x - z.x, zdy = ball.y - z.y;
+      const zdist = Math.hypot(zdx, zdy);
+      if (zdist >= PARAMS.BALL_R + ZOMBIE_R) continue;
+
+      if (z.state === 'alive') {
+        z.hp--;
+        z.stunTimer = ZOMBIE_STUN;
+        z.path = []; z.repathTimer = 999;
+        z.vx = ball.vx * 2.2; z.vy = ball.vy * 2.2;
         ball.vx *= -0.25; ball.vy *= -0.25;
-        if (zombie.hp <= 0) zombie.state = 'corpse';
-      }
-    }
-    // Ball hits corpse — knocks it to a blood pool
-    if (zombie.state === 'corpse' && zombie.stunTimer === 0) {
-      const zdx = ball.x - zombie.x, zdy = ball.y - zombie.y;
-      if (Math.hypot(zdx, zdy) < PARAMS.BALL_R + ZOMBIE_R) {
-        bloodPools.push({ x: zombie.x, y: zombie.y });
-        zombie.state = 'gone';
-        ball.vx *= 0.5; ball.vy *= 0.5;
+        if (z.hp <= 0) z.state = 'corpse';
+      } else if (z.state === 'corpse') {
+        // Reflect ball off corpse surface, then destroy the corpse
+        if (zdist > 0) {
+          const nx = zdx / zdist, ny = zdy / zdist;
+          const dot = ball.vx * nx + ball.vy * ny;
+          if (dot < 0) {
+            ball.vx -= (1 + PARAMS.BOUNCE) * dot * nx;
+            ball.vy -= (1 + PARAMS.BOUNCE) * dot * ny;
+          }
+        }
+        bloodPools.push({ x: z.x, y: z.y });
+        z.state = 'gone';
       }
     }
   }
@@ -781,9 +794,27 @@
     }
   }
 
+  function addZombie() {
+    const candidates = [];
+    for (let r = 1; r < ROWS - 1; r++) {
+      for (let c = 1; c < COLS - 1; c++) {
+        if (getTile(c, r) === ROCK) continue;
+        const cx = c * T + T / 2, cy = r * T + T / 2;
+        if (Math.hypot(cx - BALL_START.x, cy - BALL_START.y) < T * 2) continue;
+        if (Math.hypot(cx - HOLE_POS.x, cy - HOLE_POS.y) < T * 2) continue;
+        if (zombies.some(z => z.state !== 'gone' && Math.hypot(cx - z.x, cy - z.y) < T * 2)) continue;
+        candidates.push({ x: cx, y: cy });
+      }
+    }
+    if (candidates.length === 0) return;
+    const pos = candidates[Math.floor(Math.random() * candidates.length)];
+    zombies.push(makeZombie(pos.x, pos.y));
+  }
+
   function sinkBall() {
     wizardStartWalk();
     won = true;
+    addZombie();
     const diff = strokes - 5;
     const tags = { '-4':'Condor!!', '-3':'Albatross!', '-2':'Eagle!', '-1':'Birdie!', '0':'Par!', '1':'Bogey', '2':'Double Bogey' };
     msgEl.textContent = `Hole in ${strokes}  —  ${tags[diff] ?? `+${diff}`}`;
@@ -793,8 +824,7 @@
   function reset() {
     ball = { x: BALL_START.x, y: BALL_START.y, vx: 0, vy: 0, moving: false, inHole: false };
     wizard.x = BALL_START.x; wizard.y = BALL_START.y; wizard.path = []; wizard.walking = false;
-    Object.assign(zombie, { x: ZOMBIE_START.x, y: ZOMBIE_START.y, vx: 0, vy: 0,
-      hp: 2, stunTimer: 0, state: 'alive', path: [], repathTimer: 999 });
+    zombies = [makeZombie(ZOMBIE_START.x, ZOMBIE_START.y)];
     bloodPools = [];
     strokes = 0; won = false; gameLost = false; aiming = false;
     strokesEl.textContent = '0'; msgEl.textContent = '';
@@ -867,17 +897,17 @@
     }
   }
 
-  function drawZombie() {
-    if (zombie.state === 'gone') return;
-    ctx.save();
-    // Flash while stunned
-    if (zombie.stunTimer > 0) ctx.globalAlpha = Math.floor(zombie.stunTimer / 6) % 2 === 0 ? 0.25 : 1;
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.beginPath(); ctx.arc(zombie.x + 2, zombie.y + 3, 10, 0, Math.PI * 2); ctx.fill();
-    const sprite = zombie.state === 'corpse' ? SPRITE_CORPSE : SPRITE_ZOMBIE;
-    drawSprite(sprite, zombie.x, zombie.y, 4);
-    ctx.restore();
+  function drawZombies() {
+    for (const z of zombies) {
+      if (z.state === 'gone') continue;
+      ctx.save();
+      if (z.stunTimer > 0) ctx.globalAlpha = Math.floor(z.stunTimer / 6) % 2 === 0 ? 0.25 : 1;
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.beginPath(); ctx.arc(z.x + 2, z.y + 3, 10, 0, Math.PI * 2); ctx.fill();
+      const sprite = z.state === 'corpse' ? SPRITE_CORPSE : SPRITE_ZOMBIE;
+      drawSprite(sprite, z.x, z.y, 4);
+      ctx.restore();
+    }
   }
 
   function drawWizard() {
@@ -956,14 +986,14 @@
     drawHole();
     drawTee();
     drawBloodPools();
-    drawZombie();
+    drawZombies();
     drawWizard();
     drawAim();
     drawBall();
     drawEditOverlay();
   }
 
-  function gameLoop() { update(); updateWizard(); updateZombie(); draw(); requestAnimationFrame(gameLoop); }
+  function gameLoop() { update(); updateWizard(); updateZombies(); draw(); requestAnimationFrame(gameLoop); }
 
   // ── Input ─────────────────────────────────────────────────────────────────
 
@@ -1354,13 +1384,15 @@
   // Exposes internals for physics tests (harmless in production).
   window.__golf = {
     step: update,
-    stepAll: () => { update(); updateWizard(); updateZombie(); },
+    stepAll: () => { update(); updateWizard(); updateZombies(); },
     getball: () => ({ x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, moving: ball.moving, inHole: ball.inHole }),
     setball: s => Object.assign(ball, { inHole: false, moving: true }, s),
     resetWon: () => { won = false; },
-    getzombie: () => ({ x: zombie.x, y: zombie.y, vx: zombie.vx, vy: zombie.vy, hp: zombie.hp, state: zombie.state, dead: zombie.state === 'gone', stunTimer: zombie.stunTimer }),
-    setzombie: s => Object.assign(zombie, s),
+    getzombie:    () => { const z = zombies[0]; return { x: z.x, y: z.y, vx: z.vx, vy: z.vy, hp: z.hp, state: z.state, dead: z.state === 'gone', stunTimer: z.stunTimer }; },
+    setzombie:    s  => Object.assign(zombies[0], s),
+    getzombies:   () => zombies.map(z => ({ x: z.x, y: z.y, hp: z.hp, state: z.state, stunTimer: z.stunTimer })),
     getbloodpools: () => bloodPools.slice(),
+    triggerWin:   () => sinkBall(),
     getwizard: () => ({ x: wizard.x, y: wizard.y }),
     getstate:  () => ({ won, gameLost }),
     ballOverlapsRock() {

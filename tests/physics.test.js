@@ -330,6 +330,16 @@ const TESTS = [
   },
   {
     cat: 'Zombie',
+    name: 'Winning adds a new zombie to the level',
+    async run(page) {
+      const before = await page.evaluate(() => window.__golf.getzombies().length);
+      await page.evaluate(() => window.__golf.triggerWin());
+      const after = await page.evaluate(() => window.__golf.getzombies().length);
+      if (after !== before + 1) return `expected ${before + 1} zombies after win, got ${after}`;
+    },
+  },
+  {
+    cat: 'Zombie',
     name: 'Zombie catches wizard — gameLost becomes true',
     async run(page) {
       // Place zombie right next to wizard's starting position
