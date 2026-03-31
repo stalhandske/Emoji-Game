@@ -227,6 +227,28 @@
       z-index: 10;
     }
 
+    /* ── Power-up test button ── */
+    #powerup-btn {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(15,9,3,0.75);
+      border: 2px solid #6B5030;
+      color: #A07828;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #powerup-btn.active { border-color: #F0C040; color: #F0C040; background: rgba(80,50,10,0.85); }
+
     /* ── Sprite editor full-screen overlay ── */
     #sprite-editor {
       position: fixed;
@@ -300,6 +322,113 @@
     .se-swatch.transp {
       background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 0 0 / 8px 8px;
     }
+
+    /* ── Power-up test panel ── */
+    #powerup-panel {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: rgba(12,7,2,0.97);
+      border-top: 2px solid #6B5030;
+      padding: 10px 14px 14px;
+      transform: translateY(100%);
+      transition: transform 0.2s ease;
+      z-index: 100;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+    #powerup-panel.open { transform: translateY(0); }
+    #powerup-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #3A2810;
+      padding-bottom: 8px;
+    }
+    #powerup-panel-title {
+      color: #F0C040;
+      font-size: 13px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .pu-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+    }
+    .pu-info { flex: 1; min-width: 0; }
+    .pu-name { color: #F0C040; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+    .pu-desc { color: #806030; font-size: 10px; letter-spacing: 1px; margin-top: 2px; }
+    .pu-apply {
+      background: rgba(60,40,8,0.9);
+      border: 1px solid #6B5030;
+      color: #A07828;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      letter-spacing: 1px;
+      padding: 5px 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .pu-apply:active { background: rgba(100,70,15,0.95); }
+    .pu-apply.on { border-color: #80E060; color: #80E060; background: rgba(10,40,5,0.9); }
+    #pu-reset-btn {
+      width: 100%;
+      margin-top: 12px;
+      padding: 11px;
+      background: rgba(60,20,8,0.9);
+      border: 1px solid #7A3820;
+      border-radius: 3px;
+      color: #F06040;
+      font-size: 12px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      cursor: pointer;
+      font-family: 'Courier New', monospace;
+    }
+    #pu-reset-btn:active { background: rgba(100,30,10,0.95); }
+
+    /* ── Power-up test button ── */
+    #powerup-btn {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(15,9,3,0.75);
+      border: 2px solid #6B5030;
+      color: #A07828;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      transition: border-color 0.15s, color 0.15s;
+      line-height: 1;
+    }
+    #powerup-btn.active { border-color: #F0C040; color: #F0C040; background: rgba(80,50,10,0.85); }
+
+    /* ── Bool toggle in param editor ── */
+    .param-toggle-btn {
+      flex: 1;
+      padding: 5px 0;
+      border-radius: 3px;
+      background: rgba(40,25,5,0.9);
+      border: 1px solid #6B5030;
+      color: #806030;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      letter-spacing: 1px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    .param-toggle-btn.on { border-color: #80E060; color: #80E060; background: rgba(10,40,5,0.9); }
   </style>
 </head>
 <body>
@@ -309,6 +438,7 @@
     <canvas id="game" width="360" height="648"></canvas>
     <button id="edit-btn" title="Adjust parameters">⚙</button>
     <button id="sprite-btn" title="Sprite editor">🎨</button>
+    <button id="powerup-btn" title="Test power-ups">🧪</button>
     <button id="restart-btn">Play again</button>
   </div>
 
@@ -349,6 +479,15 @@
     </div>
     <div id="edit-sliders"></div>
     <button id="edit-copy-btn">📋 Copy values</button>
+  </div>
+
+  <div id="powerup-panel">
+    <div id="powerup-panel-header">
+      <span id="powerup-panel-title">🧪 Power-up Tester</span>
+      <button id="powerup-panel-close">✕</button>
+    </div>
+    <div id="pu-list"></div>
+    <button id="pu-reset-btn">↺ Reset all power-ups</button>
   </div>
 
   <div id="msg"></div>
@@ -1291,12 +1430,22 @@
         { key:'WIZARD_CLEARANCE', label:'Clearance',   min:2,   max:18,  step:1,   digits:0 },
       ],
     },
+    zombie: {
+      label: '🧟 Zombie',
+      params: [
+        { key:'ZOMBIE_SPEED', label:'Speed',     min:0.1, max:3.0,  step:0.05, digits:2 },
+        { key:'ZOMBIE_KNOCK', label:'Knockback', min:0.5, max:8.0,  step:0.1,  digits:1 },
+        { key:'EARLY_WALK',   label:'Quick Feet', type:'bool' },
+        { key:'CATCH_BALL',   label:'Ball Catch', type:'bool' },
+      ],
+    },
   };
 
   function groupForPos(pos) {
     if (Math.hypot(pos.x - HOLE_POS.x,   pos.y - HOLE_POS.y)   < 50) return 'hole';
     if (Math.hypot(pos.x - BALL_START.x, pos.y - BALL_START.y) < 50) return 'shot';
     if (Math.hypot(pos.x - wizard.x,     pos.y - wizard.y)     < 30) return 'wizard';
+    if (zombies.some(z => z.state !== 'gone' && Math.hypot(pos.x - z.x, pos.y - z.y) < ZOMBIE_R + 12)) return 'zombie';
     if (getTile(Math.floor(pos.x / T), Math.floor(pos.y / T)) === ROCK) return 'physics';
     return 'physics';
   }
@@ -1313,6 +1462,20 @@
     for (const p of group.params) {
       const row = document.createElement('div');
       row.className = 'param-row';
+
+      if (p.type === 'bool') {
+        // Boolean toggle row
+        row.innerHTML = `<span class="param-label">${p.label}</span><button class="param-toggle-btn${PARAMS[p.key] ? ' on' : ''}">${PARAMS[p.key] ? 'ON' : 'OFF'}</button>`;
+        container.appendChild(row);
+        const btn = row.querySelector('.param-toggle-btn');
+        btn.addEventListener('click', () => {
+          PARAMS[p.key] = !PARAMS[p.key];
+          btn.textContent = PARAMS[p.key] ? 'ON' : 'OFF';
+          btn.classList.toggle('on', PARAMS[p.key]);
+        });
+        continue;
+      }
+
       row.innerHTML =
         `<span class="param-label">${p.label}</span>` +
         `<input type="range" class="param-slider" min="${p.min}" max="${p.max}" step="${p.step}" value="${PARAMS[p.key]}">` +
@@ -1355,7 +1518,7 @@
 
   // Copy all current values as const declarations
   document.getElementById('edit-copy-btn').addEventListener('click', () => {
-    const allParams = Object.values(PARAM_GROUPS).flatMap(g => g.params);
+    const allParams = Object.values(PARAM_GROUPS).flatMap(g => g.params).filter(p => p.type !== 'bool');
     const maxKeyLen = Math.max(...allParams.map(p => p.key.length));
     const lines = allParams.map(p => {
       const v = PARAMS[p.key];
@@ -1369,6 +1532,49 @@
       btn.classList.add('copied');
       setTimeout(() => { btn.textContent = '📋 Copy values'; btn.classList.remove('copied'); }, 2000);
     });
+  });
+
+  // ── Power-up test panel ──────────────────────────────────────────────────
+
+  // Default PARAMS snapshot for resetting power-ups
+  const PARAMS_DEFAULT = { ...PARAMS };
+
+  const powerupPanel = document.getElementById('powerup-panel');
+  const powerupBtn   = document.getElementById('powerup-btn');
+
+  function buildPowerupPanel() {
+    const list = document.getElementById('pu-list');
+    list.innerHTML = '';
+    for (const pu of POWER_UPS) {
+      const row = document.createElement('div');
+      row.className = 'pu-row';
+      // Detect if bool-type power-ups are currently on
+      const isOn = (pu.id === 'earlywalk' && PARAMS.EARLY_WALK) ||
+                   (pu.id === 'catcher'   && PARAMS.CATCH_BALL);
+      row.innerHTML =
+        `<div class="pu-info"><div class="pu-name">${pu.name}</div><div class="pu-desc">${pu.desc}</div></div>` +
+        `<button class="pu-apply${isOn ? ' on' : ''}" data-id="${pu.id}">${isOn ? 'ON' : 'Apply'}</button>`;
+      list.appendChild(row);
+      row.querySelector('.pu-apply').addEventListener('click', () => {
+        pu.apply();
+        buildPowerupPanel(); // refresh to show updated state
+      });
+    }
+  }
+
+  powerupBtn.addEventListener('click', () => {
+    const open = powerupPanel.classList.toggle('open');
+    powerupBtn.classList.toggle('active', open);
+    if (open) { closePanel(); buildPowerupPanel(); }
+  });
+  document.getElementById('powerup-panel-close').addEventListener('click', () => {
+    powerupPanel.classList.remove('open');
+    powerupBtn.classList.remove('active');
+  });
+  document.getElementById('pu-reset-btn').addEventListener('click', () => {
+    // Reset only power-up-affected params to defaults
+    Object.assign(PARAMS, PARAMS_DEFAULT);
+    buildPowerupPanel();
   });
 
   // ── Sprite Editor ────────────────────────────────────────────────────────
