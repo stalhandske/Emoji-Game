@@ -551,7 +551,8 @@
     HOLE_CUP_FORCE:      0.010,  // pull toward centre once inside the cup (px/frame²)
     HOLE_SINK_SPEED:     12.0,   // max entry speed — faster balls skip over the hole
     HOLE_FRICTION:       0.96,   // friction inside the cup (replaces FRICTION)
-    WIZARD_SPEED:        2.2,    // px per frame
+    WIZARD_SPEED:        2.2,    // px per frame (walking to resting ball)
+    WIZARD_CHASE_SPEED:  1.2,    // px per frame (Quick Feet — chasing moving ball)
     WIZARD_CLEARANCE:    10,     // px — half-width clearance for path smoothing
     ZOMBIE_SPEED:        0.55,   // px per frame
     ZOMBIE_KNOCK:        2.2,    // ball-to-zombie knockback multiplier
@@ -807,13 +808,16 @@
     const target = wizard.path[0];
     const dx = target.x - wizard.x, dy = target.y - wizard.y;
     const dist = Math.hypot(dx, dy);
-    if (dist <= PARAMS.WIZARD_SPEED) {
+    const spd = (PARAMS.EARLY_WALK && ball.moving && !ball.inHole)
+      ? PARAMS.WIZARD_CHASE_SPEED
+      : PARAMS.WIZARD_SPEED;
+    if (dist <= spd) {
       wizard.x = target.x; wizard.y = target.y;
       wizard.path.shift();
       if (wizard.path.length === 0) wizard.walking = false;
     } else {
-      wizard.x += (dx / dist) * PARAMS.WIZARD_SPEED;
-      wizard.y += (dy / dist) * PARAMS.WIZARD_SPEED;
+      wizard.x += (dx / dist) * spd;
+      wizard.y += (dy / dist) * spd;
     }
   }
 
@@ -832,7 +836,7 @@
       if (rs <= 0) continue;
       z.vx     -= rs * nx;          z.vy     -= rs * ny;
       other.vx += rs * nx * 0.85;   other.vy += rs * ny * 0.85;
-      if (rs > ZOMBIE_CHAIN_SPEED && other.stunTimer === 0) {
+      if (rs > ZOMBIE_CHAIN_SPEED) {
         other.hp--;
         other.stunTimer = Math.ceil(ZOMBIE_STUN / 3);
         other.path = []; other.repathTimer = 999;
@@ -868,7 +872,7 @@
         b.vx += relSpeed * nx * 0.85;
         b.vy += relSpeed * ny * 0.85;
         // Chain damage if impact was hard enough
-        if (relSpeed > ZOMBIE_CHAIN_SPEED && b.stunTimer === 0) {
+        if (relSpeed > ZOMBIE_CHAIN_SPEED) {
           b.hp--;
           b.stunTimer = Math.ceil(ZOMBIE_STUN / 3);
           b.path = []; b.repathTimer = 999;
@@ -992,7 +996,6 @@
 
     // Ball hits zombies
     for (const z of zombies) {
-      if (z.stunTimer > 0) continue;
       const zdx = ball.x - z.x, zdy = ball.y - z.y;
       const zdist = Math.hypot(zdx, zdy);
       if (zdist >= PARAMS.BALL_R + ZOMBIE_R) continue;
@@ -1426,8 +1429,9 @@
     wizard: {
       label: '🧙 Wizard',
       params: [
-        { key:'WIZARD_SPEED',     label:'Walk speed',  min:0.5, max:6.0, step:0.1, digits:1 },
-        { key:'WIZARD_CLEARANCE', label:'Clearance',   min:2,   max:18,  step:1,   digits:0 },
+        { key:'WIZARD_SPEED',       label:'Walk speed',   min:0.5, max:6.0, step:0.1, digits:1 },
+        { key:'WIZARD_CHASE_SPEED', label:'Chase speed',  min:0.3, max:6.0, step:0.1, digits:1 },
+        { key:'WIZARD_CLEARANCE',   label:'Clearance',    min:2,   max:18,  step:1,   digits:0 },
       ],
     },
     zombie: {
