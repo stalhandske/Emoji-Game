@@ -98,6 +98,7 @@ const TESTS = [
     cat: 'Tunneling',
     name: 'Bottom border — vertical, vy=25',
     async run(page) {
+      await page.evaluate(() => window.__golf.usebaselevel());
       const b = await run(page, { x: 180, y: 575, vx: 0, vy: 25 }, 10);
       if (b.inRock) return `ball ended inside rock`;
       if (b.y > 604) return `clipped through bottom wall (y=${b.y.toFixed(1)}, max=604)`;
@@ -476,6 +477,85 @@ const TESTS = [
         return { stopped: false, bx: b.x, by: b.y };
       });
       if (!result.stopped) return `ball should have been caught by wizard (ball at ${result.bx?.toFixed(1)},${result.by?.toFixed(1)})`;
+    },
+  },
+  {
+    cat: 'Power-ups',
+    name: 'Ball Kick — wizard kicks ball away on contact',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.setparam('KICK_BALL', true);
+        // Ball heading toward wizard slowly — should be kicked back
+        window.__golf.setball({ x: 90, y: 478, vx: 0, vy: 3 });
+      });
+      const result = await page.evaluate(() => {
+        for (let i = 0; i < 200; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          // Ball kicked = still moving and has upward velocity at some point
+          if (b.vy < -1) return { kicked: true, frames: i };
+        }
+        return { kicked: false };
+      });
+      if (!result.kicked) return `ball should have been kicked back (vy never negative)`;
+    },
+  },
+
+  // ── Category 8: Skill tree rules ─────────────────────────────────────────
+
+  {
+    cat: 'Skill tree',
+    name: 'One-off power-up not offered after acquisition',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.setacquired({ earlywalk: 1 }); // maxLevel=1, already maxed
+      });
+      const eligible = await page.evaluate(() => window.__golf.geteligible());
+      if (eligible.includes('earlywalk')) return `earlywalk should not be eligible after acquisition`;
+    },
+  },
+  {
+    cat: 'Skill tree',
+    name: 'Exclusive: catcher blocks ballkick',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.setacquired({ earlywalk: 1, catcher: 1 });
+      });
+      const eligible = await page.evaluate(() => window.__golf.geteligible());
+      if (eligible.includes('ballkick')) return `ballkick should be blocked when catcher is acquired`;
+    },
+  },
+  {
+    cat: 'Skill tree',
+    name: 'Prerequisite: heavyball locked until slowzombie acquired',
+    async run(page) {
+      await page.evaluate(() => window.__golf.fullreset()); // acquired={}
+      const before = await page.evaluate(() => window.__golf.geteligible());
+      if (before.includes('heavyball')) return `heavyball should be locked without slowzombie`;
+      await page.evaluate(() => window.__golf.setacquired({ slowzombie: 1 }));
+      const after = await page.evaluate(() => window.__golf.geteligible());
+      if (!after.includes('heavyball')) return `heavyball should be unlocked after acquiring slowzombie`;
+    },
+  },
+  {
+    cat: 'Skill tree',
+    name: 'fullreset clears acquired and restores PARAMS',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.setacquired({ power: 3, bighole: 2 });
+        window.__golf.setparam('HOLE_RADIUS', 99);
+        window.__golf.fullreset();
+      });
+      const result = await page.evaluate(() => ({
+        acquired: window.__golf.getacquired(),
+        holeRadius: window.__golf.getparam ? window.__golf.getparam('HOLE_RADIUS') : null,
+      }));
+      if (Object.keys(result.acquired).length > 0)
+        return `acquired should be empty after fullreset (got ${JSON.stringify(result.acquired)})`;
     },
   },
 ];

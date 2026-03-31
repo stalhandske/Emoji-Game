@@ -429,6 +429,90 @@
       text-transform: uppercase;
     }
     .param-toggle-btn.on { border-color: #80E060; color: #80E060; background: rgba(10,40,5,0.9); }
+
+    /* ── Skill tree overlay ── */
+    #skilltree-overlay {
+      position: fixed;
+      inset: 0;
+      background: #0C0701;
+      z-index: 300;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 8px 16px;
+      gap: 8px;
+      font-family: 'Courier New', monospace;
+      overflow-y: auto;
+    }
+    #skilltree-overlay.open { display: flex; }
+    #skilltree-header {
+      width: 100%;
+      max-width: 660px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #3A2810;
+      padding-bottom: 8px;
+    }
+    #skilltree-title {
+      color: #F0C040;
+      font-size: 14px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+    #skilltree-canvas {
+      border: 1px solid #3A2810;
+      border-radius: 4px;
+      max-width: 100%;
+    }
+    #skilltree-legend {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      justify-content: center;
+      font-size: 10px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+    .st-legend-item { display: flex; align-items: center; gap: 5px; }
+    .st-swatch {
+      width: 12px; height: 12px; border-radius: 2px;
+      border: 2px solid currentColor;
+    }
+    #skilltree-detail {
+      max-width: 660px;
+      width: 100%;
+      min-height: 36px;
+      padding: 8px 12px;
+      border: 1px solid #3A2810;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.03);
+      color: #B09040;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-align: center;
+    }
+
+    /* ── Skill tree button (top-right of canvas) ── */
+    #skilltree-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(15,9,3,0.75);
+      border: 2px solid #6B5030;
+      color: #A07828;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      line-height: 1;
+    }
+    #skilltree-btn:active { background: rgba(80,50,10,0.85); }
   </style>
 </head>
 <body>
@@ -439,6 +523,7 @@
     <button id="edit-btn" title="Adjust parameters">⚙</button>
     <button id="sprite-btn" title="Sprite editor">🎨</button>
     <button id="powerup-btn" title="Test power-ups">🧪</button>
+    <button id="skilltree-btn" title="Skill tree">🌳</button>
     <button id="restart-btn">Play again</button>
   </div>
 
@@ -488,6 +573,23 @@
     </div>
     <div id="pu-list"></div>
     <button id="pu-reset-btn">↺ Reset all power-ups</button>
+  </div>
+
+  <div id="skilltree-overlay">
+    <div id="skilltree-header">
+      <span id="skilltree-title">🌳 Skill Tree</span>
+      <button class="se-btn close" id="skilltree-close">✕</button>
+    </div>
+    <canvas id="skilltree-canvas" width="640" height="230"></canvas>
+    <div id="skilltree-detail">Tap a node to see details</div>
+    <div id="skilltree-legend">
+      <span class="st-legend-item" style="color:#705030"><span class="st-swatch" style="background:#2A1E0A"></span>Locked</span>
+      <span class="st-legend-item" style="color:#F0C040"><span class="st-swatch" style="background:#3A2C10"></span>Available</span>
+      <span class="st-legend-item" style="color:#80D060"><span class="st-swatch" style="background:#1A3010"></span>Acquired</span>
+      <span class="st-legend-item" style="color:#F0D040"><span class="st-swatch" style="background:#2A2800"></span>Maxed</span>
+      <span class="st-legend-item" style="color:#805050"><span class="st-swatch" style="background:#2A0808"></span>Blocked</span>
+      <span class="st-legend-item" style="color:#606060">— Prereq &nbsp; <span style="color:#804040">- - Exclusive</span></span>
+    </div>
   </div>
 
   <div id="msg"></div>
@@ -556,8 +658,10 @@
     WIZARD_CLEARANCE:    10,     // px — half-width clearance for path smoothing
     ZOMBIE_SPEED:        0.55,   // px per frame
     ZOMBIE_KNOCK:        2.2,    // ball-to-zombie knockback multiplier
+    ZOMBIE_STUN_MULT:    1,      // multiplier on stun duration (Stun Shot power-up)
     EARLY_WALK:          false,  // wizard chases ball immediately when shot
     CATCH_BALL:          false,  // wizard catches ball if it returns to them
+    KICK_BALL:           false,  // wizard kicks ball away if it gets close
   };
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -594,32 +698,63 @@
   let won      = false;
   let gameLost = false;
   let round    = 1;  // persists across restarts; zombies per round = round - 1
+  let acquired = {}; // id → current level (0/absent = not acquired)
   let choosingPowerUp = false;
   let powerUpChoices  = [];
 
-  // Power-ups offered between rounds (2 random picks from this list).
-  // apply() is called when the player chooses it; effects accumulate across rounds.
+  // Power-ups available to offer this round: not maxed, prerequisites met, not blocked.
+  function eligiblePowerUps() {
+    return POWER_UPS.filter(pu => {
+      if ((acquired[pu.id] ?? 0) >= pu.maxLevel) return false;
+      if (pu.requires?.some(r => !(acquired[r] > 0))) return false;
+      if (pu.exclusive?.some(e => (acquired[e] ?? 0) > 0)) return false;
+      return true;
+    });
+  }
+
+  // ── Skill tree ───────────────────────────────────────────────────────────
+  // cx/cy: pixel centre in the 640×230 skill-tree canvas.
+  // maxLevel: 1 = one-off (never offered again once taken); >1 = levelled.
+  // requires: [id, …] — all must be acquired (level ≥ 1) to unlock.
+  // exclusive: [id, …] — blocked if any of these have been acquired.
   const POWER_UPS = [
-    { id: 'bighole',    name: 'Big Cup',      desc: 'Larger hole & stronger pull',
-      apply: () => { PARAMS.HOLE_RADIUS += 4; PARAMS.HOLE_ATTRACT_RADIUS += 8; PARAMS.HOLE_ATTRACT_FORCE += 0.3; } },
-    { id: 'bounce',     name: 'Lively Ball',  desc: 'More bounce off walls',
-      apply: () => { PARAMS.BOUNCE = Math.min(0.97, PARAMS.BOUNCE + 0.08); } },
-    { id: 'power',      name: 'Power Shot',   desc: 'Ball launches faster',
+    // ── Shot column (x≈70) ────────────────────────────────────────────────
+    { id:'power',       name:'Power Shot',   desc:'Ball launches +20% faster each level',
+      maxLevel:3, cx:70,  cy:40,
       apply: () => { PARAMS.POWER_SCALE *= 1.2; PARAMS.MAX_DRAG += 10; } },
-    { id: 'slowzombie', name: 'Slow Horde',   desc: 'Zombies shuffle slower',
-      apply: () => { PARAMS.ZOMBIE_SPEED = Math.max(0.15, PARAMS.ZOMBIE_SPEED * 0.75); } },
-    { id: 'lowfriction',name: 'Slick Sand',   desc: 'Ball rolls much further',
-      apply: () => { PARAMS.FRICTION = Math.min(0.99, PARAMS.FRICTION + 0.008); } },
-    { id: 'magnet',     name: 'Magnetic Cup', desc: 'Hole pulls from further away',
+    { id:'lowfriction', name:'Slick Sand',   desc:'Ball rolls much further',
+      maxLevel:3, cx:70,  cy:120, requires:['power'],
+      apply: () => { PARAMS.FRICTION = Math.min(0.995, PARAMS.FRICTION + 0.008); } },
+    { id:'bounce',      name:'Lively Ball',  desc:'More bounce off walls',
+      maxLevel:3, cx:70,  cy:200, requires:['lowfriction'],
+      apply: () => { PARAMS.BOUNCE = Math.min(0.97, PARAMS.BOUNCE + 0.08); } },
+    // ── Hole column (x≈220) ───────────────────────────────────────────────
+    { id:'bighole',     name:'Big Cup',      desc:'Larger hole & stronger pull',
+      maxLevel:3, cx:220, cy:40,
+      apply: () => { PARAMS.HOLE_RADIUS += 4; PARAMS.HOLE_ATTRACT_RADIUS += 8; PARAMS.HOLE_ATTRACT_FORCE += 0.3; } },
+    { id:'magnet',      name:'Magnetic Cup', desc:'Hole pulls from much further away',
+      maxLevel:2, cx:220, cy:120, requires:['bighole'],
       apply: () => { PARAMS.HOLE_ATTRACT_RADIUS += 12; PARAMS.HOLE_ATTRACT_FORCE += 0.5; } },
-    { id: 'heavyball',  name: 'Heavy Ball',   desc: 'Zombies fly further when hit',
+    // ── Zombie column (x≈380) ─────────────────────────────────────────────
+    { id:'slowzombie',  name:'Slow Horde',   desc:'Zombies shuffle slower each level',
+      maxLevel:3, cx:380, cy:40,
+      apply: () => { PARAMS.ZOMBIE_SPEED = Math.max(0.1, PARAMS.ZOMBIE_SPEED * 0.75); } },
+    { id:'heavyball',   name:'Heavy Ball',   desc:'Zombies fly further when hit',
+      maxLevel:3, cx:380, cy:120, requires:['slowzombie'],
       apply: () => { PARAMS.ZOMBIE_KNOCK *= 1.3; } },
-    { id: 'stun',       name: 'Stun Shot',    desc: 'Zombies stay stunned longer',
-      apply: () => { /* coming soon */ } },
-    { id: 'earlywalk', name: 'Quick Feet',   desc: 'Wizard walks as soon as you shoot',
+    { id:'stun',        name:'Stun Shot',    desc:'Zombies stay stunned twice as long',
+      maxLevel:1, cx:380, cy:200, requires:['heavyball'],
+      apply: () => { PARAMS.ZOMBIE_STUN_MULT *= 2; } },
+    // ── Wizard column (x≈530/480/590) ─────────────────────────────────────
+    { id:'earlywalk',   name:'Quick Feet',   desc:'Wizard chases ball as soon as you shoot',
+      maxLevel:1, cx:530, cy:40,
       apply: () => { PARAMS.EARLY_WALK = true; } },
-    { id: 'catcher',   name: 'Ball Catcher', desc: 'Wizard catches ball if it returns to them',
+    { id:'catcher',     name:'Ball Catcher', desc:'Wizard catches ball on return',
+      maxLevel:1, cx:480, cy:155, requires:['earlywalk'], exclusive:['ballkick'],
       apply: () => { PARAMS.CATCH_BALL = true; } },
+    { id:'ballkick',    name:'Ball Kick',    desc:'Wizard boots ball back on return',
+      maxLevel:1, cx:590, cy:155, requires:['earlywalk'], exclusive:['catcher'],
+      apply: () => { PARAMS.KICK_BALL = true; } },
   ];
 
   const ZOMBIE_START = { x: 4.5 * T, y: 8.5 * T };
@@ -838,7 +973,7 @@
       other.vx += rs * nx * 0.85;   other.vy += rs * ny * 0.85;
       if (rs > ZOMBIE_CHAIN_SPEED) {
         other.hp--;
-        other.stunTimer = Math.ceil(ZOMBIE_STUN / 3);
+        other.stunTimer = Math.ceil(ZOMBIE_STUN / 3 * PARAMS.ZOMBIE_STUN_MULT);
         other.path = []; other.repathTimer = 999;
         if (other.hp <= 0 && other.state === 'alive') other.state = 'corpse';
         else if (other.state === 'corpse') { bloodPools.push({ x: other.x, y: other.y }); other.state = 'gone'; }
@@ -874,7 +1009,7 @@
         // Chain damage if impact was hard enough
         if (relSpeed > ZOMBIE_CHAIN_SPEED) {
           b.hp--;
-          b.stunTimer = Math.ceil(ZOMBIE_STUN / 3);
+          b.stunTimer = Math.ceil(ZOMBIE_STUN / 3 * PARAMS.ZOMBIE_STUN_MULT);
           b.path = []; b.repathTimer = 999;
           if (b.hp <= 0 && b.state === 'alive') b.state = 'corpse';
           else if (b.state === 'corpse') { bloodPools.push({ x: b.x, y: b.y }); b.state = 'gone'; }
@@ -952,12 +1087,22 @@
 
     ballAge++;
 
-    // CATCH_BALL: wizard catches ball after a grace period of 15 frames
-    if (PARAMS.CATCH_BALL && ballAge > 15) {
-      if (Math.hypot(ball.x - wizard.x, ball.y - wizard.y) < PARAMS.BALL_R + 14) {
-        ball.vx = 0; ball.vy = 0; ball.moving = false;
-        wizard.walking = false;
-        return;
+    // CATCH_BALL / KICK_BALL — both use a 15-frame grace period so the ball
+    // can leave the wizard's feet before triggering.
+    if (ballAge > 15) {
+      const wdx = ball.x - wizard.x, wdy = ball.y - wizard.y;
+      const wdist = Math.hypot(wdx, wdy);
+      if (wdist < PARAMS.BALL_R + 14) {
+        if (PARAMS.CATCH_BALL) {
+          ball.vx = 0; ball.vy = 0; ball.moving = false;
+          wizard.walking = false;
+          return;
+        }
+        if (PARAMS.KICK_BALL) {
+          const nx = wdist > 0 ? wdx / wdist : 1, ny = wdist > 0 ? wdy / wdist : 0;
+          ball.vx = nx * 10; ball.vy = ny * 10;
+          ballAge = 0; // reset grace so we don't re-kick next frame
+        }
       }
     }
 
@@ -1002,7 +1147,7 @@
 
       if (z.state === 'alive') {
         z.hp--;
-        z.stunTimer = ZOMBIE_STUN;
+        z.stunTimer = Math.round(ZOMBIE_STUN * PARAMS.ZOMBIE_STUN_MULT);
         z.path = []; z.repathTimer = 999;
         z.vx = ball.vx * PARAMS.ZOMBIE_KNOCK; z.vy = ball.vy * PARAMS.ZOMBIE_KNOCK;
         ball.vx *= -0.25; ball.vy *= -0.25;
@@ -1111,13 +1256,17 @@
     const tags = { '-4':'Condor!!', '-3':'Albatross!', '-2':'Eagle!', '-1':'Birdie!', '0':'Par!', '1':'Bogey', '2':'Double Bogey' };
     msgEl.textContent = `Hole in ${strokes}  —  ${tags[diff] ?? `+${diff}`}`;
     // Show power-up selection; restart button appears only after a choice is made
-    const shuffled = POWER_UPS.slice().sort(() => Math.random() - 0.5);
-    powerUpChoices  = shuffled.slice(0, 2);
+    powerUpChoices = eligiblePowerUps().sort(() => Math.random() - 0.5).slice(0, 2);
+    if (powerUpChoices.length === 0) { reset(); return; } // nothing left to offer
     choosingPowerUp = true;
   }
 
   function reset() {
-    if (gameLost) round = 1; // death resets progression
+    if (gameLost) {
+      round = 1;
+      acquired = {};
+      Object.assign(PARAMS, PARAMS_DEFAULT); // wipe all power-up effects
+    }
     // Generate level first — addZombie needs getTile to work on the new layout
     for (let attempt = 0; attempt < 20; attempt++) {
       level = generateLevel();
@@ -1283,6 +1432,7 @@
 
   function drawPowerUpScreen() {
     if (!choosingPowerUp) return;
+    const n = powerUpChoices.length;
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1293,26 +1443,39 @@
     ctx.fillStyle = 'rgba(240,200,100,0.6)';
     ctx.font = '11px sans-serif';
     ctx.fillText(`Round ${round} — ${round - 1} zombie${round - 1 === 1 ? '' : 's'} incoming`, canvas.width / 2, 128);
-    const CW = 148, CH = 96, gap = 12;
-    const x0 = canvas.width / 2 - CW - gap / 2, y0 = 144;
-    for (let i = 0; i < 2; i++) {
+    const CW = 148, CH = 100, gap = 12;
+    const totalW = n * CW + (n - 1) * gap;
+    const x0 = canvas.width / 2 - totalW / 2, y0 = 144;
+    for (let i = 0; i < n; i++) {
       const pu = powerUpChoices[i];
-      const bx = i === 0 ? x0 : x0 + CW + gap;
+      const bx = x0 + i * (CW + gap);
+      const lvl = (acquired[pu.id] ?? 0) + 1; // level after picking
       ctx.fillStyle = 'rgba(70,52,18,0.92)';
       ctx.strokeStyle = '#C8A440'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.roundRect(bx, y0, CW, CH, 8); ctx.fill(); ctx.stroke();
+      // Name
       ctx.fillStyle = '#FFFFFF'; ctx.font = 'bold 13px sans-serif';
-      ctx.fillText(pu.name, bx + CW / 2, y0 + 26);
+      ctx.fillText(pu.name, bx + CW / 2, y0 + 24);
+      // Level dots (only for levelled power-ups)
+      if (pu.maxLevel > 1) {
+        const dotR = 4, dotGap = 10, totalDots = pu.maxLevel;
+        const dotsW = totalDots * dotGap;
+        for (let d = 0; d < totalDots; d++) {
+          const dx = bx + CW / 2 - dotsW / 2 + d * dotGap + dotGap / 2;
+          ctx.fillStyle = d < lvl ? '#F0C040' : '#4A3010';
+          ctx.beginPath(); ctx.arc(dx, y0 + 38, dotR - 1, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      // Description
       ctx.fillStyle = 'rgba(240,220,160,0.9)'; ctx.font = '10px sans-serif';
-      // Simple word-wrap at ~22 chars
       const words = pu.desc.split(' ');
-      let line = '', lines = [], lx = bx + CW / 2, ly = y0 + 52;
+      let line = '', lines = [], lx = bx + CW / 2, ly = pu.maxLevel > 1 ? y0 + 56 : y0 + 48;
       for (const w of words) {
         const test = line ? line + ' ' + w : w;
         if (test.length > 22 && line) { lines.push(line); line = w; } else line = test;
       }
       lines.push(line);
-      lines.forEach((l, n) => ctx.fillText(l, lx, ly + n * 14));
+      lines.forEach((l, nn) => ctx.fillText(l, lx, ly + nn * 14));
     }
     ctx.restore();
   }
@@ -1345,12 +1508,16 @@
 
   function pickPowerUp(pos) {
     if (!choosingPowerUp) return false;
+    const n = powerUpChoices.length;
     const CW = 148, CH = 96, gap = 12;
-    const x0 = canvas.width / 2 - CW - gap / 2, y0 = 144;
-    for (let i = 0; i < 2; i++) {
-      const bx = i === 0 ? x0 : x0 + CW + gap;
+    const totalW = n * CW + (n - 1) * gap;
+    const x0 = canvas.width / 2 - totalW / 2, y0 = 144;
+    for (let i = 0; i < n; i++) {
+      const bx = x0 + i * (CW + gap);
       if (pos.x >= bx && pos.x <= bx + CW && pos.y >= y0 && pos.y <= y0 + CH) {
-        powerUpChoices[i].apply();
+        const pu = powerUpChoices[i];
+        acquired[pu.id] = (acquired[pu.id] ?? 0) + 1;
+        pu.apply(acquired[pu.id]);
         reset();
         return true;
       }
@@ -1437,10 +1604,12 @@
     zombie: {
       label: '🧟 Zombie',
       params: [
-        { key:'ZOMBIE_SPEED', label:'Speed',     min:0.1, max:3.0,  step:0.05, digits:2 },
-        { key:'ZOMBIE_KNOCK', label:'Knockback', min:0.5, max:8.0,  step:0.1,  digits:1 },
-        { key:'EARLY_WALK',   label:'Quick Feet', type:'bool' },
-        { key:'CATCH_BALL',   label:'Ball Catch', type:'bool' },
+        { key:'ZOMBIE_SPEED',     label:'Speed',      min:0.1, max:3.0,  step:0.05, digits:2 },
+        { key:'ZOMBIE_KNOCK',     label:'Knockback',  min:0.5, max:8.0,  step:0.1,  digits:1 },
+        { key:'ZOMBIE_STUN_MULT', label:'Stun mult',  min:0.5, max:8.0,  step:0.5,  digits:1 },
+        { key:'EARLY_WALK',       label:'Quick Feet', type:'bool' },
+        { key:'CATCH_BALL',       label:'Ball Catch', type:'bool' },
+        { key:'KICK_BALL',        label:'Ball Kick',  type:'bool' },
       ],
     },
   };
@@ -1576,9 +1745,139 @@
     powerupBtn.classList.remove('active');
   });
   document.getElementById('pu-reset-btn').addEventListener('click', () => {
-    // Reset only power-up-affected params to defaults
     Object.assign(PARAMS, PARAMS_DEFAULT);
+    acquired = {};
     buildPowerupPanel();
+  });
+
+  // ── Skill Tree ────────────────────────────────────────────────────────────
+
+  const stCanvas  = document.getElementById('skilltree-canvas');
+  const stCtx     = stCanvas.getContext('2d');
+  const ST_NW = 94, ST_NH = 44; // node width / height
+
+  const ST_COLORS = {
+    locked:    { fill:'#2A1E0A', stroke:'#4A3820', text:'#705030' },
+    available: { fill:'#3A2C10', stroke:'#C8A440', text:'#F0C040' },
+    acquired:  { fill:'#1A3010', stroke:'#60A040', text:'#80D060' },
+    maxed:     { fill:'#2A2800', stroke:'#D0A000', text:'#F0C840' },
+    blocked:   { fill:'#2A0808', stroke:'#603030', text:'#805050' },
+  };
+
+  function stNodeState(pu) {
+    const lvl = acquired[pu.id] ?? 0;
+    if (pu.exclusive?.some(e => (acquired[e] ?? 0) > 0)) return 'blocked';
+    if (lvl >= pu.maxLevel) return 'maxed';
+    if (lvl > 0) return 'acquired';
+    if (pu.requires?.some(r => !(acquired[r] > 0))) return 'locked';
+    return 'available';
+  }
+
+  function drawSkillTree() {
+    const W = stCanvas.width, H = stCanvas.height;
+    stCtx.clearRect(0, 0, W, H);
+    stCtx.fillStyle = '#0C0701';
+    stCtx.fillRect(0, 0, W, H);
+
+    // ── Edges ──
+    // Prerequisite lines
+    for (const pu of POWER_UPS) {
+      for (const reqId of (pu.requires ?? [])) {
+        const req = POWER_UPS.find(p => p.id === reqId);
+        if (!req) continue;
+        const met = (acquired[reqId] ?? 0) > 0;
+        stCtx.strokeStyle = met ? '#506840' : '#3A2810';
+        stCtx.lineWidth = 2;
+        stCtx.setLineDash([]);
+        stCtx.beginPath();
+        stCtx.moveTo(req.cx, req.cy);
+        stCtx.lineTo(pu.cx, pu.cy);
+        stCtx.stroke();
+      }
+    }
+    // Exclusive lines
+    const seenEx = new Set();
+    for (const pu of POWER_UPS) {
+      for (const exId of (pu.exclusive ?? [])) {
+        const key = [pu.id, exId].sort().join('|');
+        if (seenEx.has(key)) continue;
+        seenEx.add(key);
+        const ex = POWER_UPS.find(p => p.id === exId);
+        if (!ex) continue;
+        stCtx.strokeStyle = '#703030';
+        stCtx.lineWidth = 1.5;
+        stCtx.setLineDash([5, 4]);
+        stCtx.beginPath();
+        stCtx.moveTo(pu.cx, pu.cy);
+        stCtx.lineTo(ex.cx, ex.cy);
+        stCtx.stroke();
+      }
+    }
+    stCtx.setLineDash([]);
+
+    // ── Nodes ──
+    for (const pu of POWER_UPS) {
+      const state = stNodeState(pu);
+      const c = ST_COLORS[state];
+      const lvl = acquired[pu.id] ?? 0;
+      const x = pu.cx - ST_NW / 2, y = pu.cy - ST_NH / 2;
+
+      stCtx.fillStyle = c.fill;
+      stCtx.strokeStyle = c.stroke;
+      stCtx.lineWidth = 2;
+      stCtx.beginPath();
+      stCtx.roundRect(x, y, ST_NW, ST_NH, 6);
+      stCtx.fill(); stCtx.stroke();
+
+      stCtx.fillStyle = c.text;
+      stCtx.textAlign = 'center';
+      stCtx.font = 'bold 10px sans-serif';
+      stCtx.fillText(pu.name, pu.cx, pu.cy - (pu.maxLevel > 1 ? 7 : 4));
+
+      if (pu.maxLevel > 1) {
+        const dotR = 4, dotGap = 11, total = pu.maxLevel * dotGap;
+        for (let i = 0; i < pu.maxLevel; i++) {
+          const dx = pu.cx - total / 2 + i * dotGap + dotGap / 2;
+          stCtx.fillStyle = i < lvl ? c.stroke : '#3A2010';
+          stCtx.beginPath();
+          stCtx.arc(dx, pu.cy + 9, dotR - 1, 0, Math.PI * 2);
+          stCtx.fill();
+        }
+      } else {
+        stCtx.font = '11px sans-serif';
+        stCtx.fillStyle = lvl > 0 ? c.stroke : c.text;
+        stCtx.fillText(lvl > 0 ? '✓' : '—', pu.cx, pu.cy + 10);
+      }
+    }
+  }
+
+  const skilltreeOverlay = document.getElementById('skilltree-overlay');
+  const skilltreeDetail  = document.getElementById('skilltree-detail');
+
+  document.getElementById('skilltree-btn').addEventListener('click', () => {
+    skilltreeOverlay.classList.add('open');
+    drawSkillTree();
+  });
+  document.getElementById('skilltree-close').addEventListener('click', () => {
+    skilltreeOverlay.classList.remove('open');
+  });
+
+  // Click a node to show its details
+  stCanvas.addEventListener('click', e => {
+    const r = stCanvas.getBoundingClientRect();
+    const sx = stCanvas.width  / r.width;
+    const sy = stCanvas.height / r.height;
+    const mx = (e.clientX - r.left) * sx;
+    const my = (e.clientY - r.top)  * sy;
+    const hit = POWER_UPS.find(pu =>
+      Math.abs(mx - pu.cx) <= ST_NW / 2 && Math.abs(my - pu.cy) <= ST_NH / 2);
+    if (!hit) { skilltreeDetail.textContent = 'Tap a node to see details'; return; }
+    const lvl = acquired[hit.id] ?? 0;
+    const state = stNodeState(hit);
+    const levelStr = hit.maxLevel > 1 ? ` (${lvl}/${hit.maxLevel})` : (lvl > 0 ? ' ✓' : '');
+    const reqStr = hit.requires?.length ? `  Requires: ${hit.requires.map(r => POWER_UPS.find(p=>p.id===r)?.name ?? r).join(', ')}` : '';
+    const exStr  = hit.exclusive?.length ? `  Exclusive with: ${hit.exclusive.map(e => POWER_UPS.find(p=>p.id===e)?.name ?? e).join(', ')}` : '';
+    skilltreeDetail.textContent = `${hit.name}${levelStr} [${state}] — ${hit.desc}${reqStr}${exStr}`;
   });
 
   // ── Sprite Editor ────────────────────────────────────────────────────────
@@ -1818,12 +2117,15 @@
     triggerWin:    () => sinkBall(),
     getround:      () => round,
     resetgame:     () => reset(),
-    fullreset:     () => { round = 1; gameLost = false; reset(); },
+    fullreset:     () => { round = 1; gameLost = false; acquired = {}; Object.assign(PARAMS, PARAMS_DEFAULT); reset(); },
     usebaselevel:  () => { level = cloneLevel(); },
     addzombieraw:  (x, y) => { zombies.push(makeZombie(x, y)); return zombies.length - 1; },
     getwizard: () => ({ x: wizard.x, y: wizard.y, walking: wizard.walking }),
-    getstate:  () => ({ won, gameLost }),
-    setparam:  (key, val) => { PARAMS[key] = val; },
+    getstate:    () => ({ won, gameLost }),
+    setparam:    (key, val) => { PARAMS[key] = val; },
+    getacquired:  () => ({ ...acquired }),
+    setacquired:  (a) => { acquired = { ...a }; },
+    geteligible:  () => eligiblePowerUps().map(p => p.id),
     getballage: () => ballAge,
     shootball: (vx, vy) => { ball.vx = vx; ball.vy = vy; ball.moving = true; ballAge = 0; },
     ballOverlapsRock() {
