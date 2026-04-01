@@ -651,6 +651,105 @@ const TESTS = [
         return `hexagon should have been hit at offset 20 (hp=${result.hex.hp})`;
     },
   },
+
+  // ── Category 10: Ball reflection ─────────────────────────────────────────
+
+  {
+    cat: 'Ball reflection',
+    name: 'Zombie — ball bounces back (vy flips after head-on hit)',
+    async run(page) {
+      // x=270 is clear of all rock clusters.
+      // Zombie at (270,290), ball above at (270,240) moving down.
+      // ZOMBIE_R=12, BALL_R=8 → contact at ball.y ≈ 270. Ball should reverse vy.
+      const result = await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.setzombie({ x:270, y:290, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:270, y:240, vx:0, vy:10 });
+        let vyAfter = null;
+        for (let i = 0; i < 20; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          if (b.vy < 0) { vyAfter = b.vy; break; }
+        }
+        return { vyAfter };
+      });
+      if (result.vyAfter === null) return `ball vy never became negative — ball did not bounce back`;
+    },
+  },
+  {
+    cat: 'Ball reflection',
+    name: 'Zombie — ball bounces back (vx flips after horizontal head-on hit)',
+    async run(page) {
+      const result = await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        // Zombie at (270,300), ball to the left at (220,300) moving right
+        window.__golf.setzombie({ x:270, y:300, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:220, y:300, vx:10, vy:0 });
+        let vxAfter = null;
+        for (let i = 0; i < 20; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          if (b.vx < 0) { vxAfter = b.vx; break; }
+        }
+        return { vxAfter };
+      });
+      if (result.vxAfter === null) return `ball vx never became negative — ball did not bounce back`;
+    },
+  },
+  {
+    cat: 'Ball reflection',
+    name: 'Square — ball reflects off flat face (not circular)',
+    async run(page) {
+      // Square with angle=π/4 has a perfectly horizontal top face.
+      // Ball shot from directly above should reverse vy (face normal = straight up).
+      // A circular-only collision would give the same result for head-on,
+      // but we verify the hit and reversal happen correctly.
+      const result = await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 300, 'square');
+        window.__golf.setenemyangle(0, Math.PI / 4); // flat top/bottom faces
+        // square r=13, BALL_R=8 → top face at y≈290.8; ball starts at y=250 moving down
+        window.__golf.setball({ x:270, y:250, vx:0, vy:10 });
+        let vyAfter = null;
+        for (let i = 0; i < 20; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          if (b.vy < 0) { vyAfter = b.vy; break; }
+        }
+        return { vyAfter };
+      });
+      if (result.vyAfter === null) return `ball vy never became negative — square face reflection failed`;
+    },
+  },
+  {
+    cat: 'Ball reflection',
+    name: 'Square — glancing hit produces non-zero vx component (face deflects sideways)',
+    async run(page) {
+      // Hit the top face of the square at an angle: ball comes from upper-left (vx>0, vy>0).
+      // After face reflection off horizontal top face, vy should flip but vx should stay positive.
+      const result = await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 310, 'square');
+        window.__golf.setenemyangle(0, Math.PI / 4); // flat top face at y≈297
+        // Ball from upper-left, moving diagonally down-right
+        window.__golf.setball({ x:255, y:260, vx:3, vy:8 });
+        let snapshotAtBounce = null;
+        for (let i = 0; i < 30; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          if (b.vy < 0) { snapshotAtBounce = { vx: b.vx, vy: b.vy }; break; }
+        }
+        return snapshotAtBounce;
+      });
+      if (!result) return `ball never bounced off square`;
+      if (result.vx <= 0) return `vx should stay positive after top-face reflection (vx=${result.vx.toFixed(2)})`;
+      if (result.vy >= 0) return `vy should flip negative after top-face reflection (vy=${result.vy.toFixed(2)})`;
+    },
+  },
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

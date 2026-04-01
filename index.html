@@ -847,8 +847,10 @@
     return v;
   }
 
-  // Circle vs convex polygon.  Returns {pen, nx, ny} (push-circle-out normal) or null.
-  function circleVsPoly(cx, cy, cr, verts) {
+  // Circle vs convex polygon.  Returns {pen, nx, ny} or null.
+  // nx/ny is the outward face normal of the closest edge — gives shape-based reflection.
+  // pcx/pcy = polygon centre (used to orient the face normal outward).
+  function circleVsPoly(cx, cy, cr, verts, pcx, pcy) {
     let minPen = Infinity, nx = 0, ny = 0;
     const n = verts.length;
     for (let i = 0; i < n; i++) {
@@ -857,16 +859,17 @@
       const edLen2 = edx * edx + edy * edy;
       const t = Math.max(0, Math.min(1, ((cx - ax) * edx + (cy - ay) * edy) / edLen2));
       const cpx = ax + t * edx, cpy = ay + t * edy;
-      const dx = cx - cpx, dy = cy - cpy;
-      const dist = Math.hypot(dx, dy);
-      if (dist < cr) {
-        const pen = cr - dist;
-        if (pen < minPen) {
-          minPen = pen;
-          nx = dist > 0.001 ? dx / dist : 0;
-          ny = dist > 0.001 ? dy / dist : (i % 2 === 0 ? 1 : -1);
-        }
-      }
+      const dist = Math.hypot(cx - cpx, cy - cpy);
+      if (dist >= cr) continue;
+      const pen = cr - dist;
+      if (pen >= minPen) continue;
+      minPen = pen;
+      // Outward face normal: perpendicular to edge, pointing away from polygon centre
+      const edLen = Math.sqrt(edLen2);
+      let fnx = -edy / edLen, fny = edx / edLen;
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      if (fnx * (pcx - mx) + fny * (pcy - my) > 0) { fnx = -fnx; fny = -fny; }
+      nx = fnx; ny = fny;
     }
     return minPen < Infinity ? { pen: minPen, nx, ny } : null;
   }
@@ -1147,8 +1150,7 @@
         if (spd < 0.15) z.vx = z.vy = 0;
       }
 
-      // Rotate shape enemies based on velocity
-      if (z.type === 'shape') z.angle += 0.015;
+      // Shape enemies hold their orientation — no rotation
 
       // Stun countdown
       if (z.stunTimer > 0) { z.stunTimer--; continue; }
@@ -1265,7 +1267,7 @@
       if (z.type === 'shape') {
         const cfg = SHAPE_CONFIGS[z.shape];
         const verts = polyVerts(z.x, z.y, z.r, cfg.sides, z.angle);
-        const col = circleVsPoly(ball.x, ball.y, PARAMS.BALL_R, verts);
+        const col = circleVsPoly(ball.x, ball.y, PARAMS.BALL_R, verts, z.x, z.y);
         if (!col) continue; // broad-phase false positive
         cnx = col.nx; cny = col.ny;
         // Push ball out of polygon
@@ -1282,11 +1284,11 @@
         z.path = []; z.repathTimer = 999;
         z.vx = ball.vx * PARAMS.ZOMBIE_KNOCK;
         z.vy = ball.vy * PARAMS.ZOMBIE_KNOCK;
-        // Reflect ball off collision normal
+        // Reflect ball off collision normal (cnx/cny points outward from enemy surface)
         const dot = ball.vx * cnx + ball.vy * cny;
-        if (dot > 0) { // ball moving toward enemy
-          ball.vx -= (1 + PARAMS.BOUNCE * 0.5) * dot * cnx;
-          ball.vy -= (1 + PARAMS.BOUNCE * 0.5) * dot * cny;
+        if (dot < 0) { // ball approaching — dot < 0 because normal is outward
+          ball.vx -= (1 + PARAMS.BOUNCE) * dot * cnx;
+          ball.vy -= (1 + PARAMS.BOUNCE) * dot * cny;
         }
         if (z.hp <= 0) z.state = 'corpse';
       } else if (z.state === 'corpse') {
@@ -2352,7 +2354,8 @@
     resetWon: () => { won = false; },
     getzombie:    () => { const z = zombies[0] ?? makeZombie(0,0); return { x: z.x, y: z.y, vx: z.vx, vy: z.vy, hp: z.hp, state: z.state, dead: z.state === 'gone', stunTimer: z.stunTimer }; },
     setzombie:    s  => { if (!zombies.length) zombies.push(makeZombie(s.x??200, s.y??300)); Object.assign(zombies[0], s); },
-    getzombies:   () => zombies.map(z => ({ x: z.x, y: z.y, hp: z.hp, state: z.state, stunTimer: z.stunTimer, type: z.type, shape: z.shape ?? null })),
+    getzombies:   () => zombies.map(z => ({ x: z.x, y: z.y, hp: z.hp, state: z.state, stunTimer: z.stunTimer, type: z.type, shape: z.shape ?? null, angle: z.angle ?? 0 })),
+    setenemyangle: (idx, angle) => { if (zombies[idx]) zombies[idx].angle = angle; },
     getbloodpools: () => bloodPools.slice(),
     triggerWin:    () => sinkBall(),
     getround:      () => round,
