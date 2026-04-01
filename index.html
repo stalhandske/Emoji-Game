@@ -855,11 +855,26 @@
   //   pnx/pny = direction from closest point to circle centre (use for position push-out)
   function circleVsPoly(cx, cy, cr, verts, pcx, pcy) {
     let minPen = Infinity, nx = 0, ny = 0, pnx = 1, pny = 0;
+    // SAT path: tracks edge with minimum penetration depth (used when ball is inside polygon).
+    let minSATPen = Infinity, satNx = 0, satNy = 0;
+    let allInside = true;   // true until we find an edge where ball centre is on the outside
     const n = verts.length;
     for (let i = 0; i < n; i++) {
       const [ax, ay] = verts[i], [bx, by] = verts[(i + 1) % n];
       const edx = bx - ax, edy = by - ay;
       const edLen2 = edx * edx + edy * edy;
+      const edLen = Math.sqrt(edLen2);
+      // Outward face normal (oriented away from polygon centre).
+      let fnx = -edy / edLen, fny = edx / edLen;
+      const mx = (ax + bx) / 2, my = (ay + by) / 2;
+      if (fnx * (pcx - mx) + fny * (pcy - my) > 0) { fnx = -fnx; fny = -fny; }
+      // Signed distance: positive = ball centre is outside this edge.
+      const signedDist = fnx * (cx - ax) + fny * (cy - ay);
+      if (signedDist > 0) allInside = false;
+      // SAT penetration along this edge's axis.
+      const satPen = cr - signedDist;
+      if (satPen < minSATPen) { minSATPen = satPen; satNx = fnx; satNy = fny; }
+      // Closest-point penetration (handles outside approach and corners).
       const t = Math.max(0, Math.min(1, ((cx - ax) * edx + (cy - ay) * edy) / edLen2));
       const cpx = ax + t * edx, cpy = ay + t * edy;
       const dx = cx - cpx, dy = cy - cpy;
@@ -868,17 +883,14 @@
       const pen = cr - dist;
       if (pen >= minPen) continue;
       minPen = pen;
-      // Push-out direction: from closest point toward circle centre (correct at corners)
-      pnx = dist > 0.001 ? dx / dist : 1;
-      pny = dist > 0.001 ? dy / dist : 0;
-      // Reflection normal: outward face normal of this edge
-      const edLen = Math.sqrt(edLen2);
-      let fnx = -edy / edLen, fny = edx / edLen;
-      const mx = (ax + bx) / 2, my = (ay + by) / 2;
-      if (fnx * (pcx - mx) + fny * (pcy - my) > 0) { fnx = -fnx; fny = -fny; }
+      pnx = dist > 0.001 ? dx / dist : fnx;
+      pny = dist > 0.001 ? dy / dist : fny;
       nx = fnx; ny = fny;
     }
-    return minPen < Infinity ? { pen: minPen, nx, ny, pnx, pny } : null;
+    if (minPen < Infinity) return { pen: minPen, nx, ny, pnx, pny };
+    // Ball centre is fully inside the polygon — push out via the nearest face (SAT).
+    if (allInside && minSATPen > 0) return { pen: minSATPen, nx: satNx, ny: satNy, pnx: satNx, pny: satNy };
+    return null;
   }
 
   function makeZombie(x, y) {

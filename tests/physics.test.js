@@ -992,6 +992,40 @@ const TESTS = [
   },
   {
     cat: 'Angle/speed — shapes',
+    name: 'Fast ball does not tunnel through hexagon (inside-polygon SAT fallback)',
+    async run(page) {
+      // Hexagon r=17, inscribed radius ≈14.7.  At speed 30 the ball can jump from
+      // outside the bounding sphere to inside the polygon in one sub-step — the
+      // SAT inside-polygon fallback must detect and push it back out.
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 310, 'hexagon'); // hp=4
+        window.__golf.setball({ x:270, y:230, vx:0, vy:30 });
+        for (let i = 0; i < 6; i++) window.__golf.step();
+        const z = window.__golf.getzombies()[0];
+        const b = window.__golf.getball();
+        return { hp: z.hp, ballY: b.y, vy: b.vy };
+      });
+      if (r.hp >= 4) return `fast ball tunnelled through hexagon (hp=${r.hp}, ballY=${r.ballY.toFixed(1)})`;
+    },
+  },
+  {
+    cat: 'Angle/speed — shapes',
+    name: 'Fast ball does not tunnel through square (inside-polygon SAT fallback)',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 310, 'square'); // hp=2
+        window.__golf.setball({ x:270, y:230, vx:0, vy:35 });
+        for (let i = 0; i < 6; i++) window.__golf.step();
+        const z = window.__golf.getzombies()[0];
+        return { hp: z.hp, ballY: window.__golf.getball().y };
+      });
+      if (r.hp >= 2) return `fast ball tunnelled through square (hp=${r.hp}, ballY=${r.ballY.toFixed(1)})`;
+    },
+  },
+  {
+    cat: 'Angle/speed — shapes',
     name: 'Square corner hit — ball deflects (push-out is correct at corners)',
     async run(page) {
       // Square angle=π/4, corner at upper-right: (270+13*cos(π/4+3π/2), 310+13*sin(…))
