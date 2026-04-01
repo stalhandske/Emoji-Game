@@ -854,41 +854,40 @@
   //   nx/ny  = outward face normal of closest edge  (use for velocity reflection)
   //   pnx/pny = direction from closest point to circle centre (use for position push-out)
   function circleVsPoly(cx, cy, cr, verts, pcx, pcy) {
-    let minPen = Infinity, nx = 0, ny = 0, pnx = 1, pny = 0;
-    // SAT path: tracks edge with minimum penetration depth (used when ball is inside polygon).
+    // maxPen: track the edge where the ball penetrates DEEPEST (primary contact face).
+    // At corners two edges share the same vertex; minimum-pen picks the near-tangent edge
+    // whose face normal may not oppose the approach velocity → dot > 0 → no reflection.
+    // Maximum-pen picks the face the ball is most "inside of", giving a reliable dot < 0.
+    let maxPen = 0, nx = 0, ny = 0, pnx = 1, pny = 0;
+    // SAT path: minimum signed-distance penetration, for when ball centre is fully inside.
     let minSATPen = Infinity, satNx = 0, satNy = 0;
-    let allInside = true;   // true until we find an edge where ball centre is on the outside
+    let allInside = true;
     const n = verts.length;
     for (let i = 0; i < n; i++) {
       const [ax, ay] = verts[i], [bx, by] = verts[(i + 1) % n];
       const edx = bx - ax, edy = by - ay;
       const edLen2 = edx * edx + edy * edy;
       const edLen = Math.sqrt(edLen2);
-      // Outward face normal (oriented away from polygon centre).
       let fnx = -edy / edLen, fny = edx / edLen;
       const mx = (ax + bx) / 2, my = (ay + by) / 2;
       if (fnx * (pcx - mx) + fny * (pcy - my) > 0) { fnx = -fnx; fny = -fny; }
-      // Signed distance: positive = ball centre is outside this edge.
       const signedDist = fnx * (cx - ax) + fny * (cy - ay);
       if (signedDist > 0) allInside = false;
-      // SAT penetration along this edge's axis.
       const satPen = cr - signedDist;
       if (satPen < minSATPen) { minSATPen = satPen; satNx = fnx; satNy = fny; }
-      // Closest-point penetration (handles outside approach and corners).
       const t = Math.max(0, Math.min(1, ((cx - ax) * edx + (cy - ay) * edy) / edLen2));
       const cpx = ax + t * edx, cpy = ay + t * edy;
       const dx = cx - cpx, dy = cy - cpy;
       const dist = Math.hypot(dx, dy);
       if (dist >= cr) continue;
       const pen = cr - dist;
-      if (pen >= minPen) continue;
-      minPen = pen;
+      if (pen <= maxPen) continue;   // keep the deepest penetration
+      maxPen = pen;
       pnx = dist > 0.001 ? dx / dist : fnx;
       pny = dist > 0.001 ? dy / dist : fny;
       nx = fnx; ny = fny;
     }
-    if (minPen < Infinity) return { pen: minPen, nx, ny, pnx, pny };
-    // Ball centre is fully inside the polygon — push out via the nearest face (SAT).
+    if (maxPen > 0) return { pen: maxPen, nx, ny, pnx, pny };
     if (allInside && minSATPen > 0) return { pen: minSATPen, nx: satNx, ny: satNy, pnx: satNx, pny: satNy };
     return null;
   }
@@ -992,9 +991,13 @@
         const verts = polyVerts(z.x, z.y, z.r, cfg.sides, z.angle);
         const col = circleVsPoly(ball.x, ball.y, PARAMS.BALL_R, verts, z.x, z.y);
         if (!col) continue;
-        cnx = col.nx; cny = col.ny;
-        // Push out along closest-point direction (pnx/pny), not face normal —
-        // they diverge at corners and using the face normal leaves residual overlap.
+        // Use pnx/pny (closest-point → ball direction) for BOTH push-out and reflection.
+        // For face hits pnx≈nx so flat-face behaviour is preserved.
+        // For corner hits col.nx (face normal) can have dot>0 with the incoming velocity
+        // (wrong orientation), causing the reflection guard to silently skip — the ball
+        // gets pushed out but keeps going in the same direction.  pnx/pny always points
+        // away from the contact point so the dot check is reliable in every case.
+        cnx = col.pnx; cny = col.pny;
         ball.x += col.pnx * col.pen; ball.y += col.pny * col.pen;
       } else {
         cnx = zdist > 0 ? zdx / zdist : 1;

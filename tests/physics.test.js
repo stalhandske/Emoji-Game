@@ -1048,6 +1048,68 @@ const TESTS = [
       if (!r.deflected) return `square corner hit but ball was not deflected`;
     },
   },
+
+  // ── Category 13: Multi-angle triangle shots ──────────────────────────────
+  // Triangle (apex up, r=11) at (270, 310).  Shoot from 8 compass directions
+  // at 3 speeds.  Every hit must cause the ball to deflect — i.e. its velocity
+  // component along the approach axis must reverse sign.
+  // We place the ball 60px away along each approach axis so it always hits.
+
+  ...(() => {
+    const SX = 270, SY = 310, DIST = 60;
+    const dirs = [
+      { name: 'N',  ang: -Math.PI/2 },
+      { name: 'NE', ang: -Math.PI/4 },
+      { name: 'E',  ang: 0          },
+      { name: 'SE', ang:  Math.PI/4 },
+      { name: 'S',  ang:  Math.PI/2 },
+      { name: 'SW', ang:  3*Math.PI/4 },
+      { name: 'W',  ang:  Math.PI   },
+      { name: 'NW', ang: -3*Math.PI/4 },
+    ];
+    const speeds = [8, 18, 30];
+    const tests = [];
+    for (const { name, ang } of dirs) {
+      for (const spd of speeds) {
+        // Ball starts DIST px away in the opposite direction of approach
+        const startX = SX - Math.cos(ang) * DIST;
+        const startY = SY - Math.sin(ang) * DIST;
+        const vx = Math.cos(ang) * spd;
+        const vy = Math.sin(ang) * spd;
+        tests.push({
+          cat: 'Triangle multi-angle',
+          name: `Triangle — approach from ${name} speed ${spd}: ball deflects`,
+          async run(page) {
+            const cfg = { SX, SY, startX, startY, vx, vy, ang };
+            const r = await page.evaluate((c) => {
+              window.__golf.fullreset(); window.__golf.usebaselevel();
+              window.__golf.addshaperaw(c.SX, c.SY, 'triangle');
+              window.__golf.setball({ x: c.startX, y: c.startY, vx: c.vx, vy: c.vy });
+              // Dominant axis of approach
+              const axisIsX = Math.abs(c.vx) >= Math.abs(c.vy);
+              const initComponent = axisIsX ? c.vx : c.vy;
+              let deflected = false;
+              for (let i = 0; i < 20; i++) {
+                window.__golf.step();
+                const b = window.__golf.getball();
+                const comp = axisIsX ? b.vx : b.vy;
+                // Deflected = velocity component on approach axis flipped sign
+                if (Math.sign(comp) !== Math.sign(initComponent) && Math.abs(comp) > 0.5) {
+                  deflected = true; break;
+                }
+              }
+              const z = window.__golf.getzombies()[0];
+              return { deflected, hp: z.hp };
+            }, cfg);
+            if (r.hp >= 1) return `ball missed triangle entirely (hp=${r.hp})`;
+            if (!r.deflected) return `triangle hit but ball was not deflected (kept going same direction)`;
+          },
+        });
+      }
+    }
+    return tests;
+  })(),
+
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────
