@@ -850,8 +850,11 @@
   // Circle vs convex polygon.  Returns {pen, nx, ny} or null.
   // nx/ny is the outward face normal of the closest edge — gives shape-based reflection.
   // pcx/pcy = polygon centre (used to orient the face normal outward).
+  // Returns { pen, nx, ny, pnx, pny } where:
+  //   nx/ny  = outward face normal of closest edge  (use for velocity reflection)
+  //   pnx/pny = direction from closest point to circle centre (use for position push-out)
   function circleVsPoly(cx, cy, cr, verts, pcx, pcy) {
-    let minPen = Infinity, nx = 0, ny = 0;
+    let minPen = Infinity, nx = 0, ny = 0, pnx = 1, pny = 0;
     const n = verts.length;
     for (let i = 0; i < n; i++) {
       const [ax, ay] = verts[i], [bx, by] = verts[(i + 1) % n];
@@ -859,19 +862,23 @@
       const edLen2 = edx * edx + edy * edy;
       const t = Math.max(0, Math.min(1, ((cx - ax) * edx + (cy - ay) * edy) / edLen2));
       const cpx = ax + t * edx, cpy = ay + t * edy;
-      const dist = Math.hypot(cx - cpx, cy - cpy);
+      const dx = cx - cpx, dy = cy - cpy;
+      const dist = Math.hypot(dx, dy);
       if (dist >= cr) continue;
       const pen = cr - dist;
       if (pen >= minPen) continue;
       minPen = pen;
-      // Outward face normal: perpendicular to edge, pointing away from polygon centre
+      // Push-out direction: from closest point toward circle centre (correct at corners)
+      pnx = dist > 0.001 ? dx / dist : 1;
+      pny = dist > 0.001 ? dy / dist : 0;
+      // Reflection normal: outward face normal of this edge
       const edLen = Math.sqrt(edLen2);
       let fnx = -edy / edLen, fny = edx / edLen;
       const mx = (ax + bx) / 2, my = (ay + by) / 2;
       if (fnx * (pcx - mx) + fny * (pcy - my) > 0) { fnx = -fnx; fny = -fny; }
       nx = fnx; ny = fny;
     }
-    return minPen < Infinity ? { pen: minPen, nx, ny } : null;
+    return minPen < Infinity ? { pen: minPen, nx, ny, pnx, pny } : null;
   }
 
   function makeZombie(x, y) {
@@ -974,7 +981,9 @@
         const col = circleVsPoly(ball.x, ball.y, PARAMS.BALL_R, verts, z.x, z.y);
         if (!col) continue;
         cnx = col.nx; cny = col.ny;
-        ball.x += cnx * col.pen; ball.y += cny * col.pen;
+        // Push out along closest-point direction (pnx/pny), not face normal —
+        // they diverge at corners and using the face normal leaves residual overlap.
+        ball.x += col.pnx * col.pen; ball.y += col.pny * col.pen;
       } else {
         cnx = zdist > 0 ? zdx / zdist : 1;
         cny = zdist > 0 ? zdy / zdist : 0;

@@ -792,6 +792,228 @@ const TESTS = [
       }
     },
   },
+
+  // ── Category 11: Comprehensive angle/speed — zombie ──────────────────────
+
+  // Helper used by many tests below: shoot ball toward zombie, run N frames,
+  // check that (a) zombie took damage and (b) velocity reversed in approach axis.
+  // Encodes the full check inline via page.evaluate so each test is self-contained.
+
+  {
+    cat: 'Angle/speed — zombie',
+    name: 'Speed 30 — straight down: no tunnel, ball bounces up',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.setzombie({ x:270, y:310, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:270, y:230, vx:0, vy:30 });
+        let vyAfter = null;
+        for (let i = 0; i < 8; i++) { window.__golf.step(); const b = window.__golf.getball(); if (b.vy < 0) { vyAfter = b.vy; break; } }
+        return { hp: window.__golf.getzombies()[0].hp, vyAfter };
+      });
+      if (r.hp >= 2) return `ball tunnelled — zombie hp unchanged`;
+      if (r.vyAfter === null) return `zombie hit but ball vy never reversed (ball didn't bounce back)`;
+    },
+  },
+  {
+    cat: 'Angle/speed — zombie',
+    name: 'Speed 30 — straight up: no tunnel, ball bounces down',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.setzombie({ x:270, y:230, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:270, y:310, vx:0, vy:-30 });
+        let vyAfter = null;
+        for (let i = 0; i < 8; i++) { window.__golf.step(); const b = window.__golf.getball(); if (b.vy > 0) { vyAfter = b.vy; break; } }
+        return { hp: window.__golf.getzombies()[0].hp, vyAfter };
+      });
+      if (r.hp >= 2) return `ball tunnelled — zombie hp unchanged`;
+      if (r.vyAfter === null) return `ball vy never reversed positive (ball didn't bounce back)`;
+    },
+  },
+  {
+    cat: 'Angle/speed — zombie',
+    name: 'Speed 30 — straight right: no tunnel, ball bounces left',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.setzombie({ x:220, y:300, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:140, y:300, vx:30, vy:0 });
+        let vxAfter = null;
+        for (let i = 0; i < 8; i++) { window.__golf.step(); const b = window.__golf.getball(); if (b.vx < 0) { vxAfter = b.vx; break; } }
+        return { hp: window.__golf.getzombies()[0].hp, vxAfter };
+      });
+      if (r.hp >= 2) return `ball tunnelled — zombie hp unchanged`;
+      if (r.vxAfter === null) return `ball vx never reversed (ball didn't bounce back)`;
+    },
+  },
+  {
+    cat: 'Angle/speed — zombie',
+    name: 'Speed 30 — straight left: no tunnel, ball bounces right',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.setzombie({ x:140, y:300, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:220, y:300, vx:-30, vy:0 });
+        let vxAfter = null;
+        for (let i = 0; i < 8; i++) { window.__golf.step(); const b = window.__golf.getball(); if (b.vx > 0) { vxAfter = b.vx; break; } }
+        return { hp: window.__golf.getzombies()[0].hp, vxAfter };
+      });
+      if (r.hp >= 2) return `ball tunnelled — zombie hp unchanged`;
+      if (r.vxAfter === null) return `ball vx never reversed (ball didn't bounce back)`;
+    },
+  },
+  {
+    cat: 'Angle/speed — zombie',
+    name: 'Speed 28 — diagonal (down-right): hit detected, vx and vy both reverse',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        // Ball approaching zombie from upper-left at 45°; zombie directly below-right
+        window.__golf.setzombie({ x:270, y:310, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        const spd = 20; // vx=vy=20 → speed≈28
+        window.__golf.setball({ x:215, y:255, vx:spd, vy:spd });
+        let snapshot = null;
+        for (let i = 0; i < 10; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          if (b.vx < 0 && b.vy < 0) { snapshot = { vx: b.vx, vy: b.vy }; break; }
+        }
+        return { hp: window.__golf.getzombies()[0].hp, snapshot };
+      });
+      if (r.hp >= 2) return `ball tunnelled — zombie hp unchanged`;
+      if (!r.snapshot) return `vx and vy never both reversed (ball didn't bounce back diagonally)`;
+    },
+  },
+  {
+    cat: 'Angle/speed — zombie',
+    name: 'Speed 35 — extreme speed: sub-stepping catches the collision',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.setzombie({ x:270, y:310, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:270, y:220, vx:0, vy:35 });
+        for (let i = 0; i < 6; i++) window.__golf.step();
+        return { hp: window.__golf.getzombies()[0].hp };
+      });
+      if (r.hp >= 2) return `extreme-speed ball tunnelled through zombie`;
+    },
+  },
+  {
+    cat: 'Angle/speed — zombie',
+    name: 'Moving zombie: walking toward ball — collision still detected',
+    async run(page) {
+      // Zombie starts far, has vx set to simulate walking fast toward the ball.
+      // We use setzombie with vx so it moves during stepAll().
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        // Place zombie to the right, ball moving slowly left — zombie walks right (away)
+        // Instead: place zombie just outside range with a velocity toward ball
+        window.__golf.setzombie({ x:310, y:300, vx:-8, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:220, y:300, vx:5, vy:0 });
+        for (let i = 0; i < 8; i++) window.__golf.stepAll();
+        return { hp: window.__golf.getzombies()[0].hp };
+      });
+      if (r.hp >= 2) return `moving zombie not hit — tunnelled or missed`;
+    },
+  },
+
+  // ── Category 12: Comprehensive angle/speed — shape enemies ───────────────
+
+  {
+    cat: 'Angle/speed — shapes',
+    name: 'Speed 30 — triangle flat base hit from below: ball bounces back down',
+    async run(page) {
+      // Triangle with apex-up has a horizontal base at the bottom (outward normal = down).
+      // Ball approaches from below (vy=-30) and should bounce back downward (vy>0).
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 310, 'triangle'); // base at y≈321.5
+        window.__golf.setball({ x:270, y:400, vx:0, vy:-30 });
+        let vyAfter = null;
+        for (let i = 0; i < 8; i++) { window.__golf.step(); const b = window.__golf.getball(); if (b.vy > 0) { vyAfter = b.vy; break; } }
+        return { hp: window.__golf.getzombies()[0].hp, vyAfter };
+      });
+      if (r.hp >= 1) return `ball tunnelled through triangle base (hp unchanged)`;
+      if (r.vyAfter === null) return `triangle base hit but ball vy never reversed to positive`;
+    },
+  },
+  {
+    cat: 'Angle/speed — shapes',
+    name: 'Speed 30 — flat face of square (top face hit from above)',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 310, 'square'); // angle=π/4 → flat top
+        window.__golf.setball({ x:270, y:230, vx:0, vy:30 });
+        let vyAfter = null;
+        for (let i = 0; i < 8; i++) { window.__golf.step(); const b = window.__golf.getball(); if (b.vy < 0) { vyAfter = b.vy; break; } }
+        return { hp: window.__golf.getzombies()[0].hp, vyAfter };
+      });
+      if (r.hp >= 2) return `ball tunnelled through square face (hp unchanged)`;
+      if (r.vyAfter === null) return `square hit but ball vy never reversed`;
+    },
+  },
+  {
+    cat: 'Angle/speed — shapes',
+    name: 'Speed 30 — hexagon flat face from above',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 310, 'hexagon'); // angle=0 → flat top face
+        window.__golf.setball({ x:270, y:220, vx:0, vy:30 });
+        let vyAfter = null;
+        for (let i = 0; i < 8; i++) { window.__golf.step(); const b = window.__golf.getball(); if (b.vy < 0) { vyAfter = b.vy; break; } }
+        return { hp: window.__golf.getzombies()[0].hp, vyAfter };
+      });
+      if (r.hp >= 4) return `ball tunnelled through hexagon (hp unchanged)`;
+      if (r.vyAfter === null) return `hexagon hit but ball vy never reversed`;
+    },
+  },
+  {
+    cat: 'Angle/speed — shapes',
+    name: 'Speed 28 — diagonal hit on pentagon',
+    async run(page) {
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 310, 'pentagon');
+        window.__golf.setball({ x:215, y:255, vx:20, vy:20 }); // 45° down-right
+        let bounced = false;
+        for (let i = 0; i < 10; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          if (b.vx < 0 || b.vy < 0) { bounced = true; break; }
+        }
+        return { hp: window.__golf.getzombies()[0].hp, bounced };
+      });
+      if (r.hp >= 3) return `ball tunnelled through pentagon (hp unchanged)`;
+      if (!r.bounced) return `pentagon hit but ball velocity never deflected`;
+    },
+  },
+  {
+    cat: 'Angle/speed — shapes',
+    name: 'Square corner hit — ball deflects (push-out is correct at corners)',
+    async run(page) {
+      // Square angle=π/4, corner at upper-right: (270+13*cos(π/4+3π/2), 310+13*sin(…))
+      // = approx (279.2, 300.8). Ball approaches corner from upper-right.
+      const r = await page.evaluate(() => {
+        window.__golf.fullreset(); window.__golf.usebaselevel();
+        window.__golf.addshaperaw(270, 310, 'square'); // angle=π/4
+        // Upper-right corner is at ~(279, 301). Approach from upper-right.
+        window.__golf.setball({ x:310, y:270, vx:-20, vy:20 });
+        let deflected = false;
+        for (let i = 0; i < 10; i++) {
+          window.__golf.step();
+          const b = window.__golf.getball();
+          // After corner hit, at least one velocity component should flip
+          if (b.vx > 0 || b.vy < 0) { deflected = true; break; }
+        }
+        return { hp: window.__golf.getzombies()[0].hp, deflected };
+      });
+      if (r.hp >= 2) return `ball tunnelled through square corner (hp unchanged)`;
+      if (!r.deflected) return `square corner hit but ball was not deflected`;
+    },
+  },
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────
