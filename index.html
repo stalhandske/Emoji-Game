@@ -513,6 +513,62 @@
       line-height: 1;
     }
     #skilltree-btn:active { background: rgba(80,50,10,0.85); }
+
+    /* ── Spawn-enemy button + panel ── */
+    #spawn-btn {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(15,9,3,0.75);
+      border: 2px solid #6B5030;
+      color: #A07828;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      line-height: 1;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #spawn-btn.active { border-color: #F0C040; color: #F0C040; background: rgba(80,50,10,0.85); }
+
+    #spawn-panel {
+      position: absolute;
+      top: 52px;
+      left: 10px;
+      background: rgba(12,7,1,0.95);
+      border: 1px solid #6B5030;
+      border-radius: 6px;
+      padding: 6px;
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      z-index: 20;
+    }
+    #spawn-panel.open { display: flex; }
+
+    .spawn-type-btn {
+      background: rgba(30,18,5,0.9);
+      border: 1px solid #6B5030;
+      border-radius: 4px;
+      color: #C09040;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      letter-spacing: 1px;
+      padding: 5px 10px;
+      cursor: pointer;
+      text-align: left;
+      white-space: nowrap;
+      transition: border-color 0.1s, color 0.1s;
+    }
+    .spawn-type-btn:hover { border-color: #F0C040; color: #F0C040; }
+
+    /* crosshair cursor while placing */
+    #game.spawn-mode { cursor: crosshair; }
   </style>
 </head>
 <body>
@@ -524,6 +580,14 @@
     <button id="sprite-btn" title="Sprite editor">🎨</button>
     <button id="powerup-btn" title="Test power-ups">🧪</button>
     <button id="skilltree-btn" title="Skill tree">🌳</button>
+    <button id="spawn-btn" title="Spawn enemy">👾</button>
+    <div id="spawn-panel">
+      <button class="spawn-type-btn" data-type="zombie">🧟 Zombie</button>
+      <button class="spawn-type-btn" data-type="triangle">▲ Triangle</button>
+      <button class="spawn-type-btn" data-type="square">■ Square</button>
+      <button class="spawn-type-btn" data-type="pentagon">⬠ Pentagon</button>
+      <button class="spawn-type-btn" data-type="hexagon">⬡ Hexagon</button>
+    </div>
     <button id="restart-btn">Play again</button>
   </div>
 
@@ -1660,8 +1724,15 @@
     return true; // swallow all clicks while overlay is open
   }
 
+  function placeSpawnedEnemy(pos) {
+    if (spawnMode === 'zombie') zombies.push(makeZombie(pos.x, pos.y));
+    else zombies.push(makeShapeEnemy(pos.x, pos.y, spawnMode));
+    exitSpawnMode();
+  }
+
   canvas.addEventListener('mousedown', e => {
     e.preventDefault();
+    if (spawnMode) { placeSpawnedEnemy(canvasPos(e)); return; }
     if (editMode) { openPanelForPos(canvasPos(e)); return; }
     if (pickPowerUp(canvasPos(e))) return;
     if (won || gameLost || ball.moving || wizard.walking) return;
@@ -1672,6 +1743,7 @@
 
   canvas.addEventListener('touchstart', e => {
     e.preventDefault();
+    if (spawnMode) { placeSpawnedEnemy(canvasPos(e.touches[0])); return; }
     if (editMode) { openPanelForPos(canvasPos(e.touches[0])); return; }
     if (pickPowerUp(canvasPos(e.touches[0]))) return;
     if (won || gameLost || ball.moving || wizard.walking) return;
@@ -1883,6 +1955,39 @@
     Object.assign(PARAMS, PARAMS_DEFAULT);
     acquired = {};
     buildPowerupPanel();
+  });
+
+  // ── Spawn-enemy panel ────────────────────────────────────────────────────
+
+  let spawnMode = null; // null | 'zombie' | 'triangle' | 'square' | 'pentagon' | 'hexagon'
+  const spawnBtn   = document.getElementById('spawn-btn');
+  const spawnPanel = document.getElementById('spawn-panel');
+
+  function exitSpawnMode() {
+    spawnMode = null;
+    spawnBtn.classList.remove('active');
+    canvas.classList.remove('spawn-mode');
+  }
+
+  spawnBtn.addEventListener('click', () => {
+    const open = spawnPanel.classList.toggle('open');
+    spawnBtn.classList.toggle('active', open);
+    if (!open) exitSpawnMode();
+  });
+
+  spawnPanel.querySelectorAll('.spawn-type-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      spawnMode = btn.dataset.type;
+      spawnPanel.classList.remove('open');
+      canvas.classList.add('spawn-mode');
+    });
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && spawnMode) {
+      exitSpawnMode();
+      spawnPanel.classList.remove('open');
+    }
   });
 
   // ── Skill Tree ────────────────────────────────────────────────────────────
