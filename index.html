@@ -878,10 +878,18 @@
     return { x, y, vx: 0, vy: 0, hp: 2, stunTimer: 0, state: 'alive', path: [], repathTimer: 999,
              type: 'zombie', r: ZOMBIE_R };
   }
+  // Canonical starting angles: triangle/pentagon apex-up, square grid-aligned, hexagon flat-sided.
+  const SHAPE_DEFAULT_ANGLE = {
+    triangle: -Math.PI / 2,            // apex at top
+    square:    Math.PI / 4,            // edges horizontal + vertical
+    pentagon: -Math.PI / 2,            // apex at top, flat bottom
+    hexagon:   0,                      // flat top and bottom
+  };
+
   function makeShapeEnemy(x, y, shape) {
     const cfg = SHAPE_CONFIGS[shape];
     return { x, y, vx: 0, vy: 0, hp: cfg.hp, stunTimer: 0, state: 'alive', path: [], repathTimer: 999,
-             type: 'shape', shape, r: cfg.r, angle: Math.random() * Math.PI * 2, speedMult: cfg.speedMult };
+             type: 'shape', shape, r: cfg.r, angle: SHAPE_DEFAULT_ANGLE[shape] ?? 0, speedMult: cfg.speedMult };
   }
   let zombies    = [];  // populated by reset()
   let bloodPools = [];
@@ -946,8 +954,60 @@
     }
   }
 
+  // Incremented once per physics frame; used to prevent double-damage in sub-steps.
+  let physicsFrame = 0;
+
   function resolveCollisions() {
     resolveEntityCollisions(ball, PARAMS.BALL_R, PARAMS.BOUNCE);
+
+    // Ball hits enemies — inside the sub-step loop to catch fast shots.
+    for (const z of zombies) {
+      const zdx = ball.x - z.x, zdy = ball.y - z.y;
+      const zdist = Math.hypot(zdx, zdy);
+      if (zdist >= PARAMS.BALL_R + z.r) continue;
+
+      // Collision normal + position resolution
+      let cnx, cny;
+      if (z.type === 'shape') {
+        const cfg = SHAPE_CONFIGS[z.shape];
+        const verts = polyVerts(z.x, z.y, z.r, cfg.sides, z.angle);
+        const col = circleVsPoly(ball.x, ball.y, PARAMS.BALL_R, verts, z.x, z.y);
+        if (!col) continue;
+        cnx = col.nx; cny = col.ny;
+        ball.x += cnx * col.pen; ball.y += cny * col.pen;
+      } else {
+        cnx = zdist > 0 ? zdx / zdist : 1;
+        cny = zdist > 0 ? zdy / zdist : 0;
+        const overlap = PARAMS.BALL_R + z.r - zdist;
+        ball.x += cnx * overlap; ball.y += cny * overlap;
+      }
+
+      // Damage + velocity changes happen at most once per enemy per frame.
+      if (z.lastHitFrame === physicsFrame) continue;
+      z.lastHitFrame = physicsFrame;
+
+      if (z.state === 'alive') {
+        z.hp--;
+        z.stunTimer = Math.round(ZOMBIE_STUN * PARAMS.ZOMBIE_STUN_MULT);
+        z.path = []; z.repathTimer = 999;
+        z.vx = ball.vx * PARAMS.ZOMBIE_KNOCK;
+        z.vy = ball.vy * PARAMS.ZOMBIE_KNOCK;
+        const dot = ball.vx * cnx + ball.vy * cny;
+        if (dot < 0) {
+          ball.vx -= (1 + PARAMS.BOUNCE) * dot * cnx;
+          ball.vy -= (1 + PARAMS.BOUNCE) * dot * cny;
+        }
+        if (z.hp <= 0) z.state = 'corpse';
+      } else if (z.state === 'corpse') {
+        const dot = ball.vx * cnx + ball.vy * cny;
+        if (dot < 0) {
+          ball.vx -= (1 + PARAMS.BOUNCE) * dot * cnx;
+          ball.vy -= (1 + PARAMS.BOUNCE) * dot * cny;
+        }
+        bloodPools.push({ x: z.x, y: z.y });
+        z.state = 'gone';
+      }
+    }
   }
 
   // ── Pathfinding (A* + string-pull smoothing) ────────────────────────────
@@ -1200,6 +1260,7 @@
   function update() {
     if (!ball.moving) return;
     if (ball.inHole) { updateInHole(); return; }
+    physicsFrame++;
 
     ballAge++;
 
@@ -1253,53 +1314,6 @@
     if (speed < PARAMS.STOP_SPEED) {
       ball.vx = 0; ball.vy = 0; ball.moving = false;
       wizardStartWalk();
-    }
-
-    // Ball hits enemies (zombies + shape enemies)
-    for (const z of zombies) {
-      // Broad-phase: bounding circle check
-      const zdx = ball.x - z.x, zdy = ball.y - z.y;
-      const zdist = Math.hypot(zdx, zdy);
-      if (zdist >= PARAMS.BALL_R + z.r) continue;
-
-      // Narrow-phase collision normal — polygons use SAT, circles use radial
-      let cnx, cny;
-      if (z.type === 'shape') {
-        const cfg = SHAPE_CONFIGS[z.shape];
-        const verts = polyVerts(z.x, z.y, z.r, cfg.sides, z.angle);
-        const col = circleVsPoly(ball.x, ball.y, PARAMS.BALL_R, verts, z.x, z.y);
-        if (!col) continue; // broad-phase false positive
-        cnx = col.nx; cny = col.ny;
-        // Push ball out of polygon
-        ball.x += cnx * col.pen;
-        ball.y += cny * col.pen;
-      } else {
-        cnx = zdist > 0 ? zdx / zdist : 1;
-        cny = zdist > 0 ? zdy / zdist : 0;
-      }
-
-      if (z.state === 'alive') {
-        z.hp--;
-        z.stunTimer = Math.round(ZOMBIE_STUN * PARAMS.ZOMBIE_STUN_MULT);
-        z.path = []; z.repathTimer = 999;
-        z.vx = ball.vx * PARAMS.ZOMBIE_KNOCK;
-        z.vy = ball.vy * PARAMS.ZOMBIE_KNOCK;
-        // Reflect ball off collision normal (cnx/cny points outward from enemy surface)
-        const dot = ball.vx * cnx + ball.vy * cny;
-        if (dot < 0) { // ball approaching — dot < 0 because normal is outward
-          ball.vx -= (1 + PARAMS.BOUNCE) * dot * cnx;
-          ball.vy -= (1 + PARAMS.BOUNCE) * dot * cny;
-        }
-        if (z.hp <= 0) z.state = 'corpse';
-      } else if (z.state === 'corpse') {
-        const dot = ball.vx * cnx + ball.vy * cny;
-        if (dot < 0) {
-          ball.vx -= (1 + PARAMS.BOUNCE) * dot * cnx;
-          ball.vy -= (1 + PARAMS.BOUNCE) * dot * cny;
-        }
-        bloodPools.push({ x: z.x, y: z.y });
-        z.state = 'gone';
-      }
     }
   }
 

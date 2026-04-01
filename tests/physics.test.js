@@ -750,6 +750,48 @@ const TESTS = [
       if (result.vy >= 0) return `vy should flip negative after top-face reflection (vy=${result.vy.toFixed(2)})`;
     },
   },
+  {
+    cat: 'Ball reflection',
+    name: 'Fast ball does not tunnel through zombie',
+    async run(page) {
+      // Ball shot at speed 25 (≈3× BALL_R) — old code would skip the enemy.
+      // Ball starts 80px above zombie; without sub-step detection it would overshoot.
+      const result = await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.setzombie({ x:270, y:320, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+        window.__golf.setball({ x:270, y:240, vx:0, vy:25 });
+        for (let i = 0; i < 10; i++) window.__golf.step();
+        const z = window.__golf.getzombies()[0];
+        const b = window.__golf.getball();
+        return { hp: z.hp, ballY: b.y, ballVy: b.vy };
+      });
+      if (result.hp >= 2) return `zombie hp unchanged — fast ball tunnelled through (ballY=${result.ballY.toFixed(1)}, vy=${result.ballVy.toFixed(1)})`;
+    },
+  },
+  {
+    cat: 'Ball reflection',
+    name: 'Shape default angles — triangle apex up, square grid-aligned, hexagon flat-sided',
+    async run(page) {
+      const result = await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.addshaperaw(100, 100, 'triangle');
+        window.__golf.addshaperaw(100, 200, 'square');
+        window.__golf.addshaperaw(100, 300, 'pentagon');
+        window.__golf.addshaperaw(100, 400, 'hexagon');
+        const zs = window.__golf.getzombies();
+        return zs.map(z => ({ shape: z.shape, angle: z.angle }));
+      });
+      const PI = Math.PI;
+      const expected = { triangle: -PI/2, square: PI/4, pentagon: -PI/2, hexagon: 0 };
+      for (const z of result) {
+        const exp = expected[z.shape];
+        if (Math.abs(z.angle - exp) > 0.001)
+          return `${z.shape} should start at angle ${exp.toFixed(3)}, got ${z.angle.toFixed(3)}`;
+      }
+    },
+  },
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────
