@@ -558,6 +558,99 @@ const TESTS = [
         return `acquired should be empty after fullreset (got ${JSON.stringify(result.acquired)})`;
     },
   },
+
+  // ── Category 9: Shape enemies ─────────────────────────────────────────────
+
+  {
+    cat: 'Shape enemies',
+    name: 'addshaperaw spawns correct type and shape fields',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.addshaperaw(90,  200, 'triangle');
+        window.__golf.addshaperaw(180, 280, 'square');
+        window.__golf.addshaperaw(270, 200, 'pentagon');
+        window.__golf.addshaperaw(180, 400, 'hexagon');
+      });
+      const zs = await page.evaluate(() => window.__golf.getzombies());
+      for (const [i, shape] of ['triangle','square','pentagon','hexagon'].entries()) {
+        const z = zs[i];
+        if (z.type !== 'shape') return `enemy ${i} should have type='shape', got '${z.type}'`;
+        if (z.shape !== shape) return `enemy ${i} should have shape='${shape}', got '${z.shape}'`;
+      }
+    },
+  },
+  {
+    cat: 'Shape enemies',
+    name: 'Shape enemies have correct HP per shape config',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        window.__golf.addshaperaw(90,  200, 'triangle'); // hp:1
+        window.__golf.addshaperaw(180, 280, 'square');   // hp:2
+        window.__golf.addshaperaw(270, 200, 'pentagon'); // hp:3
+        window.__golf.addshaperaw(180, 400, 'hexagon');  // hp:4
+      });
+      const zs = await page.evaluate(() => window.__golf.getzombies());
+      const expected = { triangle:1, square:2, pentagon:3, hexagon:4 };
+      for (const [i, shape] of ['triangle','square','pentagon','hexagon'].entries()) {
+        const z = zs[i];
+        if (z.hp !== expected[shape])
+          return `${shape} should have hp=${expected[shape]}, got ${z.hp}`;
+      }
+    },
+  },
+  {
+    cat: 'Shape enemies',
+    name: 'Ball collision kills triangle shape enemy (1 HP)',
+    async run(page) {
+      await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        // x=270 is right of all rock clusters (clusters end at x=252)
+        window.__golf.addshaperaw(270, 300, 'triangle');
+        window.__golf.setball({ x: 270, y: 200, vx: 0, vy: 12 });
+      });
+      const result = await page.evaluate(() => {
+        for (let i = 0; i < 60; i++) window.__golf.step();
+        const zs = window.__golf.getzombies();
+        return { state: zs[0]?.state, hp: zs[0]?.hp };
+      });
+      if (result.state !== 'gone' && result.hp > 0)
+        return `triangle (1HP) should be dead after ball hit (state=${result.state}, hp=${result.hp})`;
+    },
+  },
+  {
+    cat: 'Shape enemies',
+    name: 'Shape enemies have per-shape collision radius',
+    async run(page) {
+      // Each shape should have a different radius — ball must be further away
+      // from hexagon to miss it than from triangle
+      const result = await page.evaluate(() => {
+        window.__golf.fullreset();
+        window.__golf.usebaselevel();
+        // Triangle r=11, hexagon r=17. Ball at same x, vy toward enemy.
+        // Miss triangle at distance 12 (< 11+8=19? no, 12<19 so it hits)
+        // Use horizontal offset: offset=14 misses triangle (r=11, ball_r=8 → 19 threshold)
+        // but hits hexagon (r=17, ball_r=8 → 25 threshold, 14<25)
+        window.__golf.addshaperaw(270, 300, 'triangle'); // r=11, threshold=19
+        window.__golf.addshaperaw(270, 450, 'hexagon');  // r=17, threshold=25
+        // Shoot ball offset by 20px — misses triangle (20>19) but just misses hexagon (20<25)
+        window.__golf.setball({ x: 270 + 20, y: 200, vx: 0, vy: 12 });
+        for (let i = 0; i < 80; i++) window.__golf.step();
+        const zs = window.__golf.getzombies();
+        return { tri: { hp: zs[0].hp, state: zs[0].state }, hex: { hp: zs[1].hp, state: zs[1].state } };
+      });
+      // Triangle should be untouched (offset 20 > r=11+8=19)
+      if (result.tri.hp !== 1)
+        return `triangle should be missed at offset 20 (hp=${result.tri.hp})`;
+      // Hexagon should be hit (offset 20 < r=17+8=25)
+      if (result.hex.hp >= 4)
+        return `hexagon should have been hit at offset 20 (hp=${result.hex.hp})`;
+    },
+  },
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────

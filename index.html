@@ -758,11 +758,63 @@
   ];
 
   const ZOMBIE_START = { x: 4.5 * T, y: 8.5 * T };
-  const ZOMBIE_R          = 12;   // collision radius (px)
-  const ZOMBIE_STUN       = 90;   // frames of stun after a ball hit
-  const ZOMBIE_CHAIN_SPEED = 3;   // min relative speed (px/frame) for chain damage
+  const ZOMBIE_R           = 12;   // collision radius for classic zombies (px)
+  const ZOMBIE_STUN        = 90;   // frames of stun after a ball hit
+  const ZOMBIE_CHAIN_SPEED = 3;    // min relative speed (px/frame) for chain damage
+
+  // ── Shape enemy configs ───────────────────────────────────────────────────
+  // Each shape variant: sides, bounding radius, max HP, speed multiplier, palette
+  const SHAPE_CONFIGS = {
+    triangle: { sides:3, r:11, hp:1, speedMult:1.4, fill:'#7040C0', stroke:'#A070F0', eye:'#F0D0FF' },
+    square:   { sides:4, r:13, hp:2, speedMult:1.0, fill:'#3050B0', stroke:'#6080E0', eye:'#C0D8FF' },
+    pentagon: { sides:5, r:15, hp:3, speedMult:0.7, fill:'#207080', stroke:'#40B0B0', eye:'#A0F0F0' },
+    hexagon:  { sides:6, r:17, hp:4, speedMult:0.5, fill:'#305820', stroke:'#50A030', eye:'#B0F090' },
+  };
+  const SHAPE_NAMES = Object.keys(SHAPE_CONFIGS);
+
+  // ── Polygon collision helpers ─────────────────────────────────────────────
+  // Returns vertex array for a regular polygon centred at (cx,cy).
+  function polyVerts(cx, cy, r, sides, angle) {
+    const v = [];
+    for (let i = 0; i < sides; i++) {
+      const a = angle + i * (Math.PI * 2 / sides);
+      v.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+    }
+    return v;
+  }
+
+  // Circle vs convex polygon.  Returns {pen, nx, ny} (push-circle-out normal) or null.
+  function circleVsPoly(cx, cy, cr, verts) {
+    let minPen = Infinity, nx = 0, ny = 0;
+    const n = verts.length;
+    for (let i = 0; i < n; i++) {
+      const [ax, ay] = verts[i], [bx, by] = verts[(i + 1) % n];
+      const edx = bx - ax, edy = by - ay;
+      const edLen2 = edx * edx + edy * edy;
+      const t = Math.max(0, Math.min(1, ((cx - ax) * edx + (cy - ay) * edy) / edLen2));
+      const cpx = ax + t * edx, cpy = ay + t * edy;
+      const dx = cx - cpx, dy = cy - cpy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < cr) {
+        const pen = cr - dist;
+        if (pen < minPen) {
+          minPen = pen;
+          nx = dist > 0.001 ? dx / dist : 0;
+          ny = dist > 0.001 ? dy / dist : (i % 2 === 0 ? 1 : -1);
+        }
+      }
+    }
+    return minPen < Infinity ? { pen: minPen, nx, ny } : null;
+  }
+
   function makeZombie(x, y) {
-    return { x, y, vx: 0, vy: 0, hp: 2, stunTimer: 0, state: 'alive', path: [], repathTimer: 999 };
+    return { x, y, vx: 0, vy: 0, hp: 2, stunTimer: 0, state: 'alive', path: [], repathTimer: 999,
+             type: 'zombie', r: ZOMBIE_R };
+  }
+  function makeShapeEnemy(x, y, shape) {
+    const cfg = SHAPE_CONFIGS[shape];
+    return { x, y, vx: 0, vy: 0, hp: cfg.hp, stunTimer: 0, state: 'alive', path: [], repathTimer: 999,
+             type: 'shape', shape, r: cfg.r, angle: Math.random() * Math.PI * 2, speedMult: cfg.speedMult };
   }
   let zombies    = [];  // populated by reset()
   let bloodPools = [];
@@ -962,9 +1014,10 @@
       if (other === z || other.state === 'gone') continue;
       const dx = other.x - z.x, dy = other.y - z.y;
       const dist = Math.hypot(dx, dy);
-      if (dist >= ZOMBIE_R * 2 || dist === 0) continue;
+      const minD = z.r + other.r;
+      if (dist >= minD || dist === 0) continue;
       const nx = dx / dist, ny = dy / dist;
-      const overlap = ZOMBIE_R * 2 - dist;
+      const overlap = minD - dist;
       z.x     -= nx * overlap / 2;  z.y     -= ny * overlap / 2;
       other.x += nx * overlap / 2;  other.y += ny * overlap / 2;
       const rs = (z.vx - other.vx) * nx + (z.vy - other.vy) * ny;
@@ -981,7 +1034,8 @@
     }
   }
 
-  function resolveZombieZombieCollisions() {    for (let i = 0; i < zombies.length; i++) {
+  function resolveZombieZombieCollisions() {
+    for (let i = 0; i < zombies.length; i++) {
       const a = zombies[i];
       if (a.state === 'gone') continue;
       for (let j = i + 1; j < zombies.length; j++) {
@@ -989,24 +1043,16 @@
         if (b.state === 'gone') continue;
         const dx = b.x - a.x, dy = b.y - a.y;
         const dist = Math.hypot(dx, dy);
-        const minDist = ZOMBIE_R * 2;
+        const minDist = a.r + b.r;
         if (dist >= minDist || dist === 0) continue;
-        // Push apart
         const nx = dx / dist, ny = dy / dist;
         const overlap = minDist - dist;
-        a.x -= nx * overlap / 2;
-        a.y -= ny * overlap / 2;
-        b.x += nx * overlap / 2;
-        b.y += ny * overlap / 2;
-        // Relative velocity of a toward b
+        a.x -= nx * overlap / 2;  a.y -= ny * overlap / 2;
+        b.x += nx * overlap / 2;  b.y += ny * overlap / 2;
         const relSpeed = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
         if (relSpeed <= 0) continue;
-        // Transfer momentum
-        a.vx -= relSpeed * nx;
-        a.vy -= relSpeed * ny;
-        b.vx += relSpeed * nx * 0.85;
-        b.vy += relSpeed * ny * 0.85;
-        // Chain damage if impact was hard enough
+        a.vx -= relSpeed * nx;  a.vy -= relSpeed * ny;
+        b.vx += relSpeed * nx * 0.85;  b.vy += relSpeed * ny * 0.85;
         if (relSpeed > ZOMBIE_CHAIN_SPEED) {
           b.hp--;
           b.stunTimer = Math.ceil(ZOMBIE_STUN / 3 * PARAMS.ZOMBIE_STUN_MULT);
@@ -1026,16 +1072,19 @@
       // Knockback physics (sub-stepped to prevent tunnelling) — runs for both alive and corpse
       if (z.vx !== 0 || z.vy !== 0) {
         const spd = Math.hypot(z.vx, z.vy);
-        const steps = Math.max(1, Math.ceil(spd / ZOMBIE_R));
+        const steps = Math.max(1, Math.ceil(spd / z.r));
         for (let i = 0; i < steps; i++) {
           z.x += z.vx / steps;
           z.y += z.vy / steps;
-          resolveEntityCollisions(z, ZOMBIE_R, PARAMS.BOUNCE * 0.3);
+          resolveEntityCollisions(z, z.r, PARAMS.BOUNCE * 0.3);
           resolveZombieVsOthers(z);
         }
         z.vx *= 0.85; z.vy *= 0.85;
         if (spd < 0.15) z.vx = z.vy = 0;
       }
+
+      // Rotate shape enemies based on velocity
+      if (z.type === 'shape') z.angle += 0.015;
 
       // Stun countdown
       if (z.stunTimer > 0) { z.stunTimer--; continue; }
@@ -1051,21 +1100,22 @@
         z.path = smoothPath(raw, z.x, z.y);
       }
 
-      // Walk along path
+      // Walk along path — shape enemies have a per-type speed multiplier
+      const spd = PARAMS.ZOMBIE_SPEED * (z.speedMult ?? 1);
       if (z.path.length > 0) {
         const t = z.path[0];
         const dx = t.x - z.x, dy = t.y - z.y;
         const dist = Math.hypot(dx, dy);
-        if (dist <= PARAMS.ZOMBIE_SPEED) {
+        if (dist <= spd) {
           z.x = t.x; z.y = t.y; z.path.shift();
         } else {
-          z.x += (dx / dist) * PARAMS.ZOMBIE_SPEED;
-          z.y += (dy / dist) * PARAMS.ZOMBIE_SPEED;
+          z.x += (dx / dist) * spd;
+          z.y += (dy / dist) * spd;
         }
       }
 
       // Catch wizard
-      if (Math.hypot(z.x - wizard.x, z.y - wizard.y) < ZOMBIE_R + 12) {
+      if (Math.hypot(z.x - wizard.x, z.y - wizard.y) < z.r + 12) {
         gameLost = true;
         msgEl.textContent = 'DEVOURED!';
         restartBtn.classList.add('visible');
@@ -1139,28 +1189,47 @@
       wizardStartWalk();
     }
 
-    // Ball hits zombies
+    // Ball hits enemies (zombies + shape enemies)
     for (const z of zombies) {
+      // Broad-phase: bounding circle check
       const zdx = ball.x - z.x, zdy = ball.y - z.y;
       const zdist = Math.hypot(zdx, zdy);
-      if (zdist >= PARAMS.BALL_R + ZOMBIE_R) continue;
+      if (zdist >= PARAMS.BALL_R + z.r) continue;
+
+      // Narrow-phase collision normal — polygons use SAT, circles use radial
+      let cnx, cny;
+      if (z.type === 'shape') {
+        const cfg = SHAPE_CONFIGS[z.shape];
+        const verts = polyVerts(z.x, z.y, z.r, cfg.sides, z.angle);
+        const col = circleVsPoly(ball.x, ball.y, PARAMS.BALL_R, verts);
+        if (!col) continue; // broad-phase false positive
+        cnx = col.nx; cny = col.ny;
+        // Push ball out of polygon
+        ball.x += cnx * col.pen;
+        ball.y += cny * col.pen;
+      } else {
+        cnx = zdist > 0 ? zdx / zdist : 1;
+        cny = zdist > 0 ? zdy / zdist : 0;
+      }
 
       if (z.state === 'alive') {
         z.hp--;
         z.stunTimer = Math.round(ZOMBIE_STUN * PARAMS.ZOMBIE_STUN_MULT);
         z.path = []; z.repathTimer = 999;
-        z.vx = ball.vx * PARAMS.ZOMBIE_KNOCK; z.vy = ball.vy * PARAMS.ZOMBIE_KNOCK;
-        ball.vx *= -0.25; ball.vy *= -0.25;
+        z.vx = ball.vx * PARAMS.ZOMBIE_KNOCK;
+        z.vy = ball.vy * PARAMS.ZOMBIE_KNOCK;
+        // Reflect ball off collision normal
+        const dot = ball.vx * cnx + ball.vy * cny;
+        if (dot > 0) { // ball moving toward enemy
+          ball.vx -= (1 + PARAMS.BOUNCE * 0.5) * dot * cnx;
+          ball.vy -= (1 + PARAMS.BOUNCE * 0.5) * dot * cny;
+        }
         if (z.hp <= 0) z.state = 'corpse';
       } else if (z.state === 'corpse') {
-        // Reflect ball off corpse surface, then destroy the corpse
-        if (zdist > 0) {
-          const nx = zdx / zdist, ny = zdy / zdist;
-          const dot = ball.vx * nx + ball.vy * ny;
-          if (dot < 0) {
-            ball.vx -= (1 + PARAMS.BOUNCE) * dot * nx;
-            ball.vy -= (1 + PARAMS.BOUNCE) * dot * ny;
-          }
+        const dot = ball.vx * cnx + ball.vy * cny;
+        if (dot < 0) {
+          ball.vx -= (1 + PARAMS.BOUNCE) * dot * cnx;
+          ball.vy -= (1 + PARAMS.BOUNCE) * dot * cny;
         }
         bloodPools.push({ x: z.x, y: z.y });
         z.state = 'gone';
@@ -1231,7 +1300,7 @@
     return grid;
   }
 
-  function addZombie() {
+  function spawnCandidates() {
     const candidates = [];
     for (let r = 1; r < ROWS - 1; r++) {
       for (let c = 1; c < COLS - 1; c++) {
@@ -1243,9 +1312,23 @@
         candidates.push({ x: cx, y: cy });
       }
     }
+    return candidates;
+  }
+
+  function addZombie() {
+    const candidates = spawnCandidates();
     if (candidates.length === 0) return;
     const pos = candidates[Math.floor(Math.random() * candidates.length)];
     zombies.push(makeZombie(pos.x, pos.y));
+  }
+
+  function addShapeEnemy(shape) {
+    const candidates = spawnCandidates();
+    if (candidates.length === 0) return;
+    const pos = candidates[Math.floor(Math.random() * candidates.length)];
+    // Default to random shape if not specified
+    const s = shape ?? SHAPE_NAMES[Math.floor(Math.random() * SHAPE_NAMES.length)];
+    zombies.push(makeShapeEnemy(pos.x, pos.y, s));
   }
 
   function sinkBall() {
@@ -1276,7 +1359,14 @@
     wizard.x = BALL_START.x; wizard.y = BALL_START.y; wizard.path = []; wizard.walking = false; wizard.repathTimer = 0;
     ballAge = 0;
     zombies = [];
-    for (let i = 0; i < round - 1; i++) addZombie(); // round 1 → 0 zombies
+    // Round 1 → 0 enemies; round 2 → 1 zombie; round 3+ → mix in shape enemies
+    for (let i = 0; i < round - 1; i++) {
+      // From round 3: each enemy has a growing chance to be a shape enemy
+      // (33% at round 3, 50% at round 5, capped at 66%)
+      const shapePct = Math.min(0.66, (round - 2) * 0.15);
+      if (round >= 3 && Math.random() < shapePct) addShapeEnemy();
+      else addZombie();
+    }
     bloodPools = [];
     strokes = 0; won = false; gameLost = false; aiming = false; choosingPowerUp = false;
     strokesEl.textContent = '0'; msgEl.textContent = '';
@@ -1353,10 +1443,55 @@
       if (z.state === 'gone') continue;
       ctx.save();
       if (z.stunTimer > 0) ctx.globalAlpha = Math.floor(z.stunTimer / 6) % 2 === 0 ? 0.25 : 1;
-      ctx.fillStyle = 'rgba(0,0,0,0.2)';
-      ctx.beginPath(); ctx.arc(z.x + 2, z.y + 3, 10, 0, Math.PI * 2); ctx.fill();
-      const sprite = z.state === 'corpse' ? SPRITE_CORPSE : SPRITE_ZOMBIE;
-      drawSprite(sprite, z.x, z.y, 4);
+
+      if (z.type === 'shape') {
+        const cfg = SHAPE_CONFIGS[z.shape];
+        const verts = polyVerts(z.x, z.y, z.r, cfg.sides, z.angle);
+        // Drop shadow
+        ctx.beginPath();
+        const sv = polyVerts(z.x + 2, z.y + 3, z.r, cfg.sides, z.angle);
+        ctx.moveTo(sv[0][0], sv[0][1]);
+        for (let i = 1; i < sv.length; i++) ctx.lineTo(sv[i][0], sv[i][1]);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fill();
+        // Body
+        ctx.beginPath();
+        ctx.moveTo(verts[0][0], verts[0][1]);
+        for (let i = 1; i < verts.length; i++) ctx.lineTo(verts[i][0], verts[i][1]);
+        ctx.closePath();
+        ctx.fillStyle   = z.state === 'corpse' ? '#3A2810' : cfg.fill;
+        ctx.strokeStyle = z.state === 'corpse' ? '#6A4828' : cfg.stroke;
+        ctx.lineWidth = 2;
+        ctx.fill(); ctx.stroke();
+        // Eyes (two dots on the top face) — only when alive
+        if (z.state === 'alive') {
+          const eyeAngle = z.angle - Math.PI / 2; // top of polygon
+          const er = z.r * 0.45;
+          for (const side of [-1, 1]) {
+            const ex = z.x + er * Math.cos(eyeAngle + side * 0.35);
+            const ey = z.y + er * Math.sin(eyeAngle + side * 0.35);
+            ctx.beginPath(); ctx.arc(ex, ey, 2, 0, Math.PI * 2);
+            ctx.fillStyle = cfg.eye; ctx.fill();
+          }
+        }
+        // HP pips — small dots below center
+        if (z.state === 'alive') {
+          const maxHp = SHAPE_CONFIGS[z.shape].hp;
+          for (let i = 0; i < maxHp; i++) {
+            const px = z.x + (i - (maxHp - 1) / 2) * 6;
+            ctx.beginPath(); ctx.arc(px, z.y + z.r + 5, 2, 0, Math.PI * 2);
+            ctx.fillStyle = i < z.hp ? cfg.stroke : '#3A2010';
+            ctx.fill();
+          }
+        }
+      } else {
+        // Classic zombie sprite
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath(); ctx.arc(z.x + 2, z.y + 3, 10, 0, Math.PI * 2); ctx.fill();
+        const sprite = z.state === 'corpse' ? SPRITE_CORPSE : SPRITE_ZOMBIE;
+        drawSprite(sprite, z.x, z.y, 4);
+      }
+
       ctx.restore();
     }
   }
@@ -2112,7 +2247,7 @@
     resetWon: () => { won = false; },
     getzombie:    () => { const z = zombies[0] ?? makeZombie(0,0); return { x: z.x, y: z.y, vx: z.vx, vy: z.vy, hp: z.hp, state: z.state, dead: z.state === 'gone', stunTimer: z.stunTimer }; },
     setzombie:    s  => { if (!zombies.length) zombies.push(makeZombie(s.x??200, s.y??300)); Object.assign(zombies[0], s); },
-    getzombies:   () => zombies.map(z => ({ x: z.x, y: z.y, hp: z.hp, state: z.state, stunTimer: z.stunTimer })),
+    getzombies:   () => zombies.map(z => ({ x: z.x, y: z.y, hp: z.hp, state: z.state, stunTimer: z.stunTimer, type: z.type, shape: z.shape ?? null })),
     getbloodpools: () => bloodPools.slice(),
     triggerWin:    () => sinkBall(),
     getround:      () => round,
@@ -2120,6 +2255,7 @@
     fullreset:     () => { round = 1; gameLost = false; acquired = {}; Object.assign(PARAMS, PARAMS_DEFAULT); reset(); },
     usebaselevel:  () => { level = cloneLevel(); },
     addzombieraw:  (x, y) => { zombies.push(makeZombie(x, y)); return zombies.length - 1; },
+    addshaperaw:   (x, y, shape) => { zombies.push(makeShapeEnemy(x, y, shape ?? 'square')); return zombies.length - 1; },
     getwizard: () => ({ x: wizard.x, y: wizard.y, walking: wizard.walking }),
     getstate:    () => ({ won, gameLost }),
     setparam:    (key, val) => { PARAMS[key] = val; },
