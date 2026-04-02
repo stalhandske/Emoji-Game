@@ -1110,6 +1110,72 @@ const TESTS = [
     return tests;
   })(),
 
+  // ── Category 14: Off-centre hits on triangle ─────────────────────────────
+  // Same 8 compass directions, but the ball trajectory is shifted LATERALLY
+  // (perpendicular to the approach axis) so it clips a face or corner rather
+  // than hitting dead-centre.  Offsets of ±5 px and ±9 px are used; ±9 is
+  // close to the triangle's inscribed radius (≈5.5 px) so it reliably hits
+  // a corner rather than a flat face.
+
+  ...(() => {
+    const SX = 270, SY = 310, DIST = 60, SPD = 18;
+    const dirs = [
+      { name: 'N',  ang: -Math.PI/2 },
+      { name: 'NE', ang: -Math.PI/4 },
+      { name: 'E',  ang: 0          },
+      { name: 'SE', ang:  Math.PI/4 },
+      { name: 'S',  ang:  Math.PI/2 },
+      { name: 'SW', ang:  3*Math.PI/4 },
+      { name: 'W',  ang:  Math.PI   },
+      { name: 'NW', ang: -3*Math.PI/4 },
+    ];
+    const offsets = [5, 9];  // lateral pixels to shift the trajectory
+    const tests = [];
+    for (const { name, ang } of dirs) {
+      // Perpendicular (lateral) unit vector: rotate approach by +90°
+      const perpX = -Math.sin(ang), perpY = Math.cos(ang);
+      for (const off of offsets) {
+        // Ball starts DIST px back along approach axis, shifted +off laterally.
+        // The trajectory passes off-centre through the shape's bounding area.
+        const startX = SX - Math.cos(ang) * DIST + perpX * off;
+        const startY = SY - Math.sin(ang) * DIST + perpY * off;
+        const vx = Math.cos(ang) * SPD;
+        const vy = Math.sin(ang) * SPD;
+        tests.push({
+          cat: 'Triangle off-centre',
+          name: `Triangle — from ${name} offset +${off}px speed ${SPD}: deflects or misses cleanly`,
+          async run(page) {
+            const cfg = { SX, SY, startX, startY, vx, vy, ang };
+            const r = await page.evaluate((c) => {
+              window.__golf.fullreset(); window.__golf.usebaselevel();
+              window.__golf.addshaperaw(c.SX, c.SY, 'triangle');
+              window.__golf.setball({ x: c.startX, y: c.startY, vx: c.vx, vy: c.vy });
+              // For off-centre hits the ball may strike at a shallow angle —
+              // the dominant component won't reverse, but the velocity DIRECTION
+              // must change by at least 15° (genuine deflection vs. pass-through).
+              const initAngle = Math.atan2(c.vy, c.vx);
+              let deflected = false;
+              for (let i = 0; i < 20; i++) {
+                window.__golf.step();
+                const b = window.__golf.getball();
+                if (Math.hypot(b.vx, b.vy) < 1) break; // ball nearly stopped
+                let diff = Math.abs(Math.atan2(b.vy, b.vx) - initAngle);
+                if (diff > Math.PI) diff = 2 * Math.PI - diff;
+                if (diff > 15 * Math.PI / 180) { deflected = true; break; }
+              }
+              const z = window.__golf.getzombies()[0];
+              return { deflected, hp: z.hp };
+            }, cfg);
+            // If triangle was hit, ball MUST deflect.  If missed entirely, that's fine.
+            if (r.hp < 1 && !r.deflected)
+              return `triangle hit (offset ${off}px from ${name}) but ball kept going same direction`;
+          },
+        });
+      }
+    }
+    return tests;
+  })(),
+
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────
