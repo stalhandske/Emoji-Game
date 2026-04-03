@@ -1176,6 +1176,77 @@ const TESTS = [
     return tests;
   })(),
 
+  // ── Category 15: Off-centre zombie hits ──────────────────────────────────
+  // Zombies are circular, so the reflection normal always points from zombie
+  // centre toward ball centre.  Even with a lateral offset the dominant
+  // approach component MUST reverse — this is the "bounce back the way it
+  // came" guarantee the user expects from every zombie hit.
+  // ZOMBIE_R=12, BALL_R=8 → contact radius = 20px.
+  // Offsets of 5px and 10px are tested (10px = half the contact radius —
+  // still a solid hit, just off-centre).
+
+  ...(() => {
+    // ZX=240, ZY=413 is row 11 col 6 (sand).
+    // Constraints from BASE_LEVEL rocks (T=36, BALL_R=8):
+    //   Row-9 rocks  y=[324,360]: S-approach ball top must be ≥360 → startY≥368 → ZY-DIST≥368.
+    //   Row-13 rocks y=[468,504]: N-approach ball bottom must be <468 → startY+8<468 → ZY+DIST<460.
+    //   With DIST=45: ZY∈[413,414].  ZY=413 chosen.
+    // All 16 start positions (8 compass dirs × offsets +5,+10) land in open sand.
+    const SX = 240, SY = 413, DIST = 45, SPD = 18;
+    const dirs = [
+      { name: 'N',  ang: -Math.PI/2 },
+      { name: 'NE', ang: -Math.PI/4 },
+      { name: 'E',  ang: 0          },
+      { name: 'SE', ang:  Math.PI/4 },
+      { name: 'S',  ang:  Math.PI/2 },
+      { name: 'SW', ang:  3*Math.PI/4 },
+      { name: 'W',  ang:  Math.PI   },
+      { name: 'NW', ang: -3*Math.PI/4 },
+    ];
+    const offsets = [5, 10];
+    const tests = [];
+    for (const { name, ang } of dirs) {
+      const perpX = -Math.sin(ang), perpY = Math.cos(ang);
+      for (const off of offsets) {
+        const startX = SX - Math.cos(ang) * DIST + perpX * off;
+        const startY = SY - Math.sin(ang) * DIST + perpY * off;
+        const vx = Math.cos(ang) * SPD;
+        const vy = Math.sin(ang) * SPD;
+        tests.push({
+          cat: 'Zombie off-centre',
+          name: `Zombie — from ${name} offset +${off}px speed ${SPD}: bounces back along approach axis`,
+          async run(page) {
+            const cfg = { SX, SY, startX, startY, vx, vy };
+            const r = await page.evaluate((c) => {
+              window.__golf.fullreset(); window.__golf.usebaselevel();
+              window.__golf.setzombie({ x: c.SX, y: c.SY, vx:0, vy:0, hp:2, state:'alive', stunTimer:0, path:[], repathTimer:999 });
+              window.__golf.setball({ x: c.startX, y: c.startY, vx: c.vx, vy: c.vy });
+              if (window.__golf.ballOverlapsRock()) return { setupFail: true };
+              // "Bounce back the way it came" = velocity component along the original
+              // approach direction reverses sign.  More meaningful than checking a single
+              // axis: works for any approach angle including diagonals with large offsets.
+              const spd = Math.hypot(c.vx, c.vy);
+              const apx = c.vx / spd, apy = c.vy / spd; // unit approach direction
+              let bouncedBack = false;
+              for (let i = 0; i < 20; i++) {
+                window.__golf.step();
+                const b = window.__golf.getball();
+                const comp = b.vx * apx + b.vy * apy; // positive = still going same way
+                if (comp < -0.5) { bouncedBack = true; break; }
+              }
+              const z = window.__golf.getzombies()[0];
+              return { bouncedBack, hp: z.hp };
+            }, cfg);
+            if (r.setupFail) return `start position (${startX.toFixed(0)},${startY.toFixed(0)}) is inside a rock — adjust DIST or offset`;
+            if (r.hp >= 2) return `ball missed zombie entirely (hp=${r.hp})`;
+            if (!r.bouncedBack) return `zombie hit but ball did not bounce back along approach axis`;
+          },
+        });
+      }
+    }
+    return tests;
+  })(),
+
 ];
 
 // ── Runner ────────────────────────────────────────────────────────────────────
