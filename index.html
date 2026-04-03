@@ -980,6 +980,7 @@
 
     // Ball hits enemies — inside the sub-step loop to catch fast shots.
     for (const z of zombies) {
+      if (z.state === 'gone') continue;
       const zdx = ball.x - z.x, zdy = ball.y - z.y;
       const zdist = Math.hypot(zdx, zdy);
       if (zdist >= PARAMS.BALL_R + z.r) continue;
