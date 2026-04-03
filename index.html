@@ -1000,10 +1000,16 @@
         cnx = col.pnx; cny = col.pny;
         ball.x += col.pnx * col.pen; ball.y += col.pny * col.pen;
       } else {
-        cnx = zdist > 0 ? zdx / zdist : 1;
-        cny = zdist > 0 ? zdy / zdist : 0;
+        // Push out along the geometric normal (zombie→ball), which is always correct.
+        const gnx = zdist > 0 ? zdx / zdist : 1;
+        const gny = zdist > 0 ? zdy / zdist : 0;
         const overlap = PARAMS.BALL_R + z.r - zdist;
-        ball.x += cnx * overlap; ball.y += cny * overlap;
+        ball.x += gnx * overlap; ball.y += gny * overlap;
+        // Reflect along the ball's own velocity direction so it always bounces
+        // straight back toward the shooter, regardless of contact point.
+        const bspd = Math.hypot(ball.vx, ball.vy);
+        cnx = bspd > 0.01 ? -ball.vx / bspd : gnx;
+        cny = bspd > 0.01 ? -ball.vy / bspd : gny;
       }
 
       // Damage + velocity changes happen at most once per enemy per frame.
