@@ -479,30 +479,6 @@ const TESTS = [
       if (!result.stopped) return `ball should have been caught by wizard (ball at ${result.bx?.toFixed(1)},${result.by?.toFixed(1)})`;
     },
   },
-  {
-    cat: 'Power-ups',
-    name: 'Ball Kick — wizard kicks ball away on contact',
-    async run(page) {
-      await page.evaluate(() => {
-        window.__golf.fullreset();
-        window.__golf.usebaselevel();
-        window.__golf.setparam('KICK_BALL', true);
-        // Ball heading toward wizard slowly — should be kicked back
-        window.__golf.setball({ x: 90, y: 478, vx: 0, vy: 3 });
-      });
-      const result = await page.evaluate(() => {
-        for (let i = 0; i < 200; i++) {
-          window.__golf.step();
-          const b = window.__golf.getball();
-          // Ball kicked = still moving and has upward velocity at some point
-          if (b.vy < -1) return { kicked: true, frames: i };
-        }
-        return { kicked: false };
-      });
-      if (!result.kicked) return `ball should have been kicked back (vy never negative)`;
-    },
-  },
-
   // ── Category 8: Skill tree rules ─────────────────────────────────────────
 
   {
@@ -519,26 +495,11 @@ const TESTS = [
   },
   {
     cat: 'Skill tree',
-    name: 'Exclusive: catcher blocks ballkick',
-    async run(page) {
-      await page.evaluate(() => {
-        window.__golf.fullreset();
-        window.__golf.setacquired({ earlywalk: 1, catcher: 1 });
-      });
-      const eligible = await page.evaluate(() => window.__golf.geteligible());
-      if (eligible.includes('ballkick')) return `ballkick should be blocked when catcher is acquired`;
-    },
-  },
-  {
-    cat: 'Skill tree',
-    name: 'Prerequisite: heavyball locked until slowzombie acquired',
+    name: 'heavyball available without prerequisites',
     async run(page) {
       await page.evaluate(() => window.__golf.fullreset()); // acquired={}
-      const before = await page.evaluate(() => window.__golf.geteligible());
-      if (before.includes('heavyball')) return `heavyball should be locked without slowzombie`;
-      await page.evaluate(() => window.__golf.setacquired({ slowzombie: 1 }));
-      const after = await page.evaluate(() => window.__golf.geteligible());
-      if (!after.includes('heavyball')) return `heavyball should be unlocked after acquiring slowzombie`;
+      const eligible = await page.evaluate(() => window.__golf.geteligible());
+      if (!eligible.includes('heavyball')) return `heavyball should be eligible from the start`;
     },
   },
   {

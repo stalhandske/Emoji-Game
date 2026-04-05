@@ -725,7 +725,6 @@
     ZOMBIE_STUN_MULT:    1,      // multiplier on stun duration (Stun Shot power-up)
     EARLY_WALK:          false,  // wizard chases ball immediately when shot
     CATCH_BALL:          false,  // wizard catches ball if it returns to them
-    KICK_BALL:           false,  // wizard kicks ball away if it gets close
   };
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -787,38 +786,35 @@
       maxLevel:3, cx:70,  cy:40,
       apply: () => { PARAMS.POWER_SCALE *= 1.2; PARAMS.MAX_DRAG += 10; } },
     { id:'lowfriction', name:'Slick Sand',   desc:'Ball rolls much further',
-      maxLevel:3, cx:70,  cy:120, requires:['power'],
+      maxLevel:3, cx:70,  cy:120,
       apply: () => { PARAMS.FRICTION = Math.min(0.995, PARAMS.FRICTION + 0.008); } },
     { id:'bounce',      name:'Lively Ball',  desc:'More bounce off walls',
-      maxLevel:3, cx:70,  cy:200, requires:['lowfriction'],
+      maxLevel:3, cx:70,  cy:200,
       apply: () => { PARAMS.BOUNCE = Math.min(0.97, PARAMS.BOUNCE + 0.08); } },
     // ── Hole column (x≈220) ───────────────────────────────────────────────
     { id:'bighole',     name:'Big Cup',      desc:'Larger hole & stronger pull',
       maxLevel:3, cx:220, cy:40,
       apply: () => { PARAMS.HOLE_RADIUS += 4; PARAMS.HOLE_ATTRACT_RADIUS += 8; PARAMS.HOLE_ATTRACT_FORCE += 0.3; } },
     { id:'magnet',      name:'Magnetic Cup', desc:'Hole pulls from much further away',
-      maxLevel:2, cx:220, cy:120, requires:['bighole'],
+      maxLevel:2, cx:220, cy:120,
       apply: () => { PARAMS.HOLE_ATTRACT_RADIUS += 12; PARAMS.HOLE_ATTRACT_FORCE += 0.5; } },
     // ── Zombie column (x≈380) ─────────────────────────────────────────────
     { id:'slowzombie',  name:'Slow Horde',   desc:'Zombies shuffle slower each level',
       maxLevel:3, cx:380, cy:40,
       apply: () => { PARAMS.ZOMBIE_SPEED = Math.max(0.1, PARAMS.ZOMBIE_SPEED * 0.75); } },
     { id:'heavyball',   name:'Heavy Ball',   desc:'Zombies fly further when hit',
-      maxLevel:3, cx:380, cy:120, requires:['slowzombie'],
+      maxLevel:3, cx:380, cy:120,
       apply: () => { PARAMS.ZOMBIE_KNOCK *= 1.3; } },
     { id:'stun',        name:'Stun Shot',    desc:'Zombies stay stunned twice as long',
-      maxLevel:1, cx:380, cy:200, requires:['heavyball'],
+      maxLevel:1, cx:380, cy:200,
       apply: () => { PARAMS.ZOMBIE_STUN_MULT *= 2; } },
-    // ── Wizard column (x≈530/480/590) ─────────────────────────────────────
+    // ── Wizard column (x≈530/480) ─────────────────────────────────────────
     { id:'earlywalk',   name:'Quick Feet',   desc:'Wizard chases ball as soon as you shoot',
       maxLevel:1, cx:530, cy:40,
       apply: () => { PARAMS.EARLY_WALK = true; } },
     { id:'catcher',     name:'Ball Catcher', desc:'Wizard catches ball on return',
-      maxLevel:1, cx:480, cy:155, requires:['earlywalk'], exclusive:['ballkick'],
+      maxLevel:1, cx:480, cy:155,
       apply: () => { PARAMS.CATCH_BALL = true; } },
-    { id:'ballkick',    name:'Ball Kick',    desc:'Wizard boots ball back on return',
-      maxLevel:1, cx:590, cy:155, requires:['earlywalk'], exclusive:['catcher'],
-      apply: () => { PARAMS.KICK_BALL = true; } },
   ];
 
   const ZOMBIE_START = { x: 4.5 * T, y: 8.5 * T };
@@ -1295,22 +1291,13 @@
 
     ballAge++;
 
-    // CATCH_BALL / KICK_BALL — both use a 15-frame grace period so the ball
-    // can leave the wizard's feet before triggering.
-    if (ballAge > 15) {
+    // CATCH_BALL — 15-frame grace period so the ball can leave the wizard's feet before triggering.
+    if (ballAge > 15 && PARAMS.CATCH_BALL) {
       const wdx = ball.x - wizard.x, wdy = ball.y - wizard.y;
-      const wdist = Math.hypot(wdx, wdy);
-      if (wdist < PARAMS.BALL_R + 14) {
-        if (PARAMS.CATCH_BALL) {
-          ball.vx = 0; ball.vy = 0; ball.moving = false;
-          wizard.walking = false;
-          return;
-        }
-        if (PARAMS.KICK_BALL) {
-          const nx = wdist > 0 ? wdx / wdist : 1, ny = wdist > 0 ? wdy / wdist : 0;
-          ball.vx = nx * 10; ball.vy = ny * 10;
-          ballAge = 0; // reset grace so we don't re-kick next frame
-        }
+      if (Math.hypot(wdx, wdy) < PARAMS.BALL_R + 14) {
+        ball.vx = 0; ball.vy = 0; ball.moving = false;
+        wizard.walking = false;
+        return;
       }
     }
 
@@ -1863,7 +1850,6 @@
         { key:'ZOMBIE_STUN_MULT', label:'Stun mult',  min:0.5, max:8.0,  step:0.5,  digits:1 },
         { key:'EARLY_WALK',       label:'Quick Feet', type:'bool' },
         { key:'CATCH_BALL',       label:'Ball Catch', type:'bool' },
-        { key:'KICK_BALL',        label:'Ball Kick',  type:'bool' },
       ],
     },
   };
