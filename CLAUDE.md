@@ -130,15 +130,30 @@ Reflect the ball based on face geometry (flat-face bounces), not circular.
 
 Offered between rounds. Each has `id`, `maxLevel`, optional `requires` (prerequisites) and `exclusive` (mutually exclusive) arrays. Stored in `acquired` object (`id → level`).
 
-Current power-ups:
-- **Power Shot** — launch speed +20% per level
-- **Big Hole** — hole radius +50% per level
-- **Slow Zombie** — zombie speed halved per level (requires Power Shot)
-- **Heavy Ball** — ball radius +25% per level (requires Slow Zombie)
-- **Quick Feet** — wizard walks while ball is in motion
-- **Ball Catcher** — wizard catches ball when it returns (exclusive with Ball Kick)
-- **Ball Kick** — wizard kicks ball away on contact (exclusive with Ball Catcher)
-- **Stun Shot** — doubles zombie stun duration
+Current power-ups (id in parentheses):
+- **Power Shot** (`powershot`) — launch speed +20% per level
+- **Big Hole** (`bighole`) — hole radius +50% per level
+- **Slow Zombie** (`slowzombie`) — zombie speed halved per level (requires `powershot`)
+- **Heavy Ball** (`heavyball`) — ball radius +25% per level (requires `slowzombie`)
+- **Quick Feet** (`quickfeet`) — wizard walks while ball is in motion
+- **Ball Catcher** (`catchball`) — wizard catches ball when it returns (exclusive with `kickball`)
+- **Ball Kick** (`kickball`) — wizard kicks ball away on contact (exclusive with `catchball`)
+- **Stun Shot** (`stunshot`) — doubles zombie stun duration
+- **Slick Sand** (`lowfriction`) — ball rolls much further (requires `powershot`)
+- **Lively Ball** (`bounce`) — more wall bounce (requires `lowfriction`)
+
+---
+
+## Game states
+
+The game tracks state via top-level booleans/strings. Key states:
+- `won` — ball has sunk in the hole
+- `gameLost` — wizard was touched by a zombie
+- `choosingPowerUp` — power-up selection screen is active (between rounds)
+- `aiming` — player is dragging to aim a shot
+- `editMode` — developer parameter panel is open
+
+Use `getstate()` in tests to read `{ won, gameLost }`.
 
 ---
 
@@ -165,6 +180,8 @@ triggerWin()                  // sink ball in hole
 setparam(key, val)            // override a PARAMS value
 setacquired(obj)              // set acquired power-ups
 geteligible()                 // → [id, ...] of currently unlockable power-ups
+getstate()                    // → { won, gameLost }
+getzombie()                   // → single zombie (zombies[0]) data object
 ```
 
 ---
