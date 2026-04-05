@@ -13,7 +13,7 @@ node tests/physics.test.js
 ```
 
 Requires Playwright v1.56.0 (pinned in `package.json`) with the cached Chromium at
-`/root/.cache/ms-playwright/chromium-1194/`. All 111 tests must pass before deploying.
+`/root/.cache/ms-playwright/chromium-1194/`. All 109 tests must pass before deploying.
 
 ## Deploying
 
@@ -128,19 +128,19 @@ Reflect the ball based on face geometry (flat-face bounces), not circular.
 
 ## Power-ups / Skill tree
 
-Offered between rounds. Each has `id`, `maxLevel`, optional `requires` (prerequisites) and `exclusive` (mutually exclusive) arrays. Stored in `acquired` object (`id → level`).
+Offered between rounds. Each has `id`, `maxLevel`. Stored in `acquired` object (`id → level`). No prerequisites or exclusives — all power-ups are available from the start.
 
 Current power-ups (id in parentheses):
-- **Power Shot** (`powershot`) — launch speed +20% per level
-- **Big Hole** (`bighole`) — hole radius +50% per level
-- **Slow Zombie** (`slowzombie`) — zombie speed halved per level (requires `powershot`)
-- **Heavy Ball** (`heavyball`) — ball radius +25% per level (requires `slowzombie`)
-- **Quick Feet** (`quickfeet`) — wizard walks while ball is in motion
-- **Ball Catcher** (`catchball`) — wizard catches ball when it returns (exclusive with `kickball`)
-- **Ball Kick** (`kickball`) — wizard kicks ball away on contact (exclusive with `catchball`)
-- **Stun Shot** (`stunshot`) — doubles zombie stun duration
-- **Slick Sand** (`lowfriction`) — ball rolls much further (requires `powershot`)
-- **Lively Ball** (`bounce`) — more wall bounce (requires `lowfriction`)
+- **Power Shot** (`power`) — launch speed +20% per level
+- **Slick Sand** (`lowfriction`) — ball rolls much further
+- **Lively Ball** (`bounce`) — more bounce off walls
+- **Big Cup** (`bighole`) — larger hole & stronger pull per level
+- **Magnetic Cup** (`magnet`) — hole pulls from much further away
+- **Slow Horde** (`slowzombie`) — zombies shuffle slower per level
+- **Heavy Ball** (`heavyball`) — zombies fly further when hit
+- **Stun Shot** (`stun`) — zombies stay stunned twice as long
+- **Quick Feet** (`earlywalk`) — wizard chases ball as soon as you shoot
+- **Ball Catcher** (`catcher`) — wizard catches ball on return
 
 ---
 
@@ -188,7 +188,7 @@ getzombie()                   // → single zombie (zombies[0]) data object
 
 ## Test structure (`tests/physics.test.js`)
 
-111 tests across 15 categories. Run with `node tests/physics.test.js`.
+109 tests across 15 categories. Run with `node tests/physics.test.js`.
 
 | Cat | Tests | Coverage |
 |-----|-------|----------|
@@ -198,15 +198,15 @@ getzombie()                   // → single zombie (zombies[0]) data object
 | General | 15–16 | Ball comes to rest, multi-wall ricochet |
 | Zombie | 17–21 | HP, stun, knockback, win/lose |
 | Zombie chain | 22–24 | Cascade knockback |
-| Power-ups | 25–27 | Quick Feet, Ball Catcher, Ball Kick |
-| Skill tree | 28–31 | Locks, exclusives, prerequisites, reset |
-| Shape enemies | 32–35 | Type/shape fields, HP, collision, radius |
-| Ball reflection | 36–41 | Zombie bounce, square face, tunneling regression, default angles |
-| Angle/speed — zombie | 42–48 | 4 cardinal + diagonal + speed 35 + moving zombie |
-| Angle/speed — shapes | 49–55 | All four shapes, SAT fallback, corner push-out |
-| Triangle multi-angle | 56–79 | 8 compass × 3 speeds aimed at centre |
-| Triangle off-centre | 80–95 | 8 compass × 2 lateral offsets (+5, +9 px) |
-| Zombie off-centre | 96–111 | 8 compass × 2 lateral offsets (+5, +10 px); approach-axis reversal |
+| Power-ups | 25–26 | Quick Feet, Ball Catcher |
+| Skill tree | 27–29 | One-off lock, no-prereq check, reset |
+| Shape enemies | 30–33 | Type/shape fields, HP, collision, radius |
+| Ball reflection | 34–39 | Zombie bounce, square face, tunneling regression, default angles |
+| Angle/speed — zombie | 40–46 | 4 cardinal + diagonal + speed 35 + moving zombie |
+| Angle/speed — shapes | 47–53 | All four shapes, SAT fallback, corner push-out |
+| Triangle multi-angle | 54–77 | 8 compass × 3 speeds aimed at centre |
+| Triangle off-centre | 78–93 | 8 compass × 2 lateral offsets (+5, +9 px) |
+| Zombie off-centre | 94–109 | 8 compass × 2 lateral offsets (+5, +10 px); approach-axis reversal |
 
 ### Test placement rules
 - Always call `usebaselevel()` before placing enemies, to avoid random level rock interference.
